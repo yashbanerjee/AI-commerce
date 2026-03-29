@@ -1,0 +1,35 @@
+{
+  "name": "ai-ebot-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && rm -rf dist/admin/public && mkdir -p dist/admin && cp -R admin/public dist/admin/public",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "migrate": "node dist/migrate.js",
+    "cdk": "cd infra && npx cdk",
+    "cdk:synth": "cd infra && npx cdk synth"
+  },
+  "dependencies": {
+    "@aws-sdk/client-kms": "^3.758.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.86.0",
+    "pg": "^8.14.0",
+    "serverless-http": "^3.2.0",
+    "stripe": "^17.7.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.147",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.13.10",
+    "@types/pg": "^8.11.11",
+    "aws-cdk": "^2.188.0",
+    "aws-cdk-lib": "^2.188.0",
+    "constructs": "^10.4.2",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

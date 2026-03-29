@@ -1,0 +1,6 @@
+{
+  "app": "npx ts-node --project tsconfig.json bin/ai-ebot.ts",
+  "context": {
+    "@aws-cdk/aws-apigateway:usagePlanKeyOrderInsensitiveId": true
+  }
+}

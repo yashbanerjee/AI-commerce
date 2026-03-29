@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Ebot — Operator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Instrument+Serif:ital@0;1&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" class="shell">
+      <div id="view-login" class="panel login hidden" aria-live="polite">
+        <header class="login__header">
+          <h1 class="login__title">AI Ebot</h1>
+          <p class="login__subtitle">Operator console</p>
+        </header>
+        <p id="login-warning" class="banner banner--warn hidden"></p>
+        <form id="login-form" class="login__form">
+          <label class="field">
+            <span class="field__label">Admin API key</span>
+            <input
+              id="api-key-input"
+              name="apiKey"
+              type="password"
+              autocomplete="current-password"
+              class="field__input"
+              placeholder="Paste ADMIN_API_KEY"
+              required
+            />
+          </label>
+          <button type="submit" class="btn btn--primary">Unlock console</button>
+        </form>
+        <p class="login__hint">
+          Set <code>ADMIN_API_KEY</code> in the cloud environment, then paste the same value here. Keys stay in
+          this browser only (session storage).
+        </p>
+      </div>
+
+      <div id="view-app" class="layout hidden">
+        <aside class="sidebar">
+          <div class="sidebar__brand">
+            <span class="sidebar__mark">◆</span>
+            <div>
+              <div class="sidebar__name">AI Ebot</div>
+              <div class="sidebar__tag">Operator</div>
+            </div>
+          </div>
+          <nav class="nav" aria-label="Main">
+            <button type="button" class="nav__item nav__item--active" data-tab="dashboard">Dashboard</button>
+            <button type="button" class="nav__item" data-tab="tenants">Tenants</button>
+            <button type="button" class="nav__item" data-tab="tiers">Tiers</button>
+            <button type="button" class="nav__item" data-tab="system">System</button>
+          </nav>
+          <div class="sidebar__foot">
+            <button type="button" id="btn-logout" class="btn btn--ghost btn--small">Sign out</button>
+          </div>
+        </aside>
+        <main class="main">
+          <header class="main__bar">
+            <h2 id="page-title" class="main__title">Dashboard</h2>
+            <button type="button" id="btn-refresh" class="btn btn--secondary">Refresh</button>
+          </header>
+
+          <section id="tab-dashboard" class="tab tab--active">
+            <div id="dash-error" class="banner banner--error hidden"></div>
+            <div class="grid grid--metrics" id="metrics-grid"></div>
+            <div class="card">
+              <h3 class="card__title">Top sites by chats (30d)</h3>
+              <div class="table-wrap">
+                <table class="table" id="table-top">
+                  <thead>
+                    <tr>
+                      <th>Site</th>
+                      <th>URL</th>
+                      <th class="num">Chats</th>
+                    </tr>
+                  </thead>
+                  <tbody id="table-top-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <section id="tab-tenants" class="tab hidden">
+            <div class="toolbar">
+              <label class="field field--inline">
+                <span class="field__label">Search</span>
+                <input type="search" id="tenant-search" class="field__input" placeholder="URL or site name" />
+              </label>
+              <button type="button" id="tenant-search-btn" class="btn btn--secondary">Search</button>
+            </div>
+            <div id="tenants-error" class="banner banner--error hidden"></div>
+            <p class="muted tenants__hint">
+              <strong>≈ USD (30d)</strong> is an approximate OpenAI bill from recorded token counts and list-style rates for the
+              <strong>service-wide</strong> chat and embedding models (System tab). Not an invoice; override rates with
+              <code>COST_*_USD_PER_MILLION</code> env vars if needed.
+              <strong>Chat quota override</strong> replaces the plan / free-tier monthly limit for that tenant until you clear it
+              (Default).
+            </p>
+            <div class="table-wrap">
+              <table class="table table--dense" id="table-tenants">
+                <thead>
+                  <tr>
+                    <th>Site name</th>
+                    <th>URL</th>
+                    <th>Plan</th>
+                    <th>Subscription</th>
+                    <th class="num">Chats UTC mo</th>
+                    <th class="num" title="Plan limit or operator override">Effective quota</th>
+                    <th>Quota override</th>
+                    <th class="num" title="Distinct products in index vs effective cap (0 = unlimited)">Indexed products</th>
+                    <th>Assign tier</th>
+                    <th class="num">Chats 30d</th>
+                    <th class="num">Ingests 30d</th>
+                    <th class="num">Embed tok 30d</th>
+                    <th class="num">Chat prompt 30d</th>
+                    <th class="num">Chat compl 30d</th>
+                    <th class="num" title="Approximate OpenAI USD, last 30 days">≈ USD (30d)</th>
+                    <th>Last seen</th>
+                    <th>Stripe</th>
+                    <th>Tenant ID</th>
+                  </tr>
+                </thead>
+                <tbody id="table-tenants-body"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <button type="button" class="btn btn--ghost" id="pager-prev" disabled>Previous</button>
+              <span id="pager-label" class="pager__label"></span>
+              <button type="button" class="btn btn--ghost" id="pager-next" disabled>Next</button>
+            </div>
+          </section>
+
+          <section id="tab-tiers" class="tab hidden">
+            <div id="tiers-error" class="banner banner--error hidden"></div>
+            <p class="muted" id="tiers-free-line"></p>
+            <p class="muted" id="tiers-stripe-note"></p>
+            <div class="card">
+              <h3 class="card__title">Billing tiers (plans)</h3>
+              <p class="muted">
+                Slug must match <code class="mono">^[a-z][a-z0-9_-]{1,48}$</code>. Use
+                <strong>Max indexed products = 0</strong> for unlimited. Tenants without an assigned tier use the free caps
+                above.
+              </p>
+              <div class="table-wrap">
+                <table class="table table--dense" id="table-plans">
+                  <thead>
+                    <tr>
+                      <th>Slug</th>
+                      <th>Active</th>
+                      <th class="num">Sort</th>
+                      <th class="num">Monthly chats</th>
+                      <th class="num">Max indexed products</th>
+                      <th>Stripe price ID (optional)</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="table-plans-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card">
+              <h3 class="card__title">Create or update tier</h3>
+              <form id="tier-form" class="stack tier-form">
+                <div class="grid grid--tier-form">
+                  <label class="field">
+                    <span class="field__label">Slug</span>
+                    <input
+                      id="tier-slug"
+                      name="slug"
+                      type="text"
+                      class="field__input mono"
+                      placeholder="e.g. enterprise"
+                      required
+                      pattern="[a-z][a-z0-9_-]{1,48}"
+                      autocomplete="off"
+                    />
+                  </label>
+                  <label class="field">
+                    <span class="field__label">Sort order</span>
+                    <input id="tier-sort" name="sort_order" type="number" class="field__input" value="100" step="1" />
+                  </label>
+                  <label class="field field--check">
+                    <input id="tier-active" name="active" type="checkbox" checked />
+                    <span class="field__label">Active</span>
+                  </label>
+                  <label class="field">
+                    <span class="field__label">Monthly chat limit</span>
+                    <input id="tier-chats" name="monthly_chat_limit" type="number" class="field__input" min="0" step="1" value="500" />
+                  </label>
+                  <label class="field">
+                    <span class="field__label">Max indexed products (0 = unlimited)</span>
+                    <input id="tier-indexed" name="max_indexed_products" type="number" class="field__input" min="0" step="1" value="500" />
+                  </label>
+                  <label class="field">
+                    <span class="field__label">Stripe price ID</span>
+                    <input
+                      id="tier-stripe"
+                      name="stripe_price_id"
+                      type="text"
+                      class="field__input mono"
+                      placeholder="price_… (for future Checkout)"
+                      autocomplete="off"
+                    />
+                  </label>
+                </div>
+                <button type="submit" class="btn btn--primary">Save tier</button>
+              </form>
+            </div>
+          </section>
+
+          <section id="tab-system" class="tab hidden">
+            <div id="system-error" class="banner banner--error hidden"></div>
+            <div class="card">
+              <h3 class="card__title">Shared OpenAI API key</h3>
+              <p class="muted" id="openai-key-line"></p>
+              <form id="openai-key-form" class="stack">
+                <label class="field">
+                  <span class="field__label">New key (stored encrypted on server)</span>
+                  <input
+                    id="openai-key-input"
+                    type="password"
+                    autocomplete="off"
+                    class="field__input"
+                    placeholder="sk-…"
+                  />
+                </label>
+                <div class="toolbar">
+                  <button type="submit" class="btn btn--primary">Save key</button>
+                  <button type="button" class="btn btn--secondary" id="openai-key-clear">Clear stored key</button>
+                </div>
+                <p class="login__hint">
+                  If <code>OPENAI_API_KEY</code> is set in the server environment, it overrides the key stored here.
+                  Tenants never see this key.
+                </p>
+              </form>
+            </div>
+            <div class="grid grid--config" id="system-config"></div>
+            <div class="card">
+              <h3 class="card__title">API health</h3>
+              <p id="health-line" class="mono"></p>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
