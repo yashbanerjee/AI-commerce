@@ -1,14 +1,52 @@
+# WordPress + MySQL for local development. Plugin is mounted from ./wp-ai-ebot
+# Usage: docker compose up -d
+# Site: http://localhost:9080 (port chosen so site_url differs from a prior :8080 deployment for API registration)
+# From inside WordPress, reach the AI API on the host: http://host.docker.internal:8787
+
 services:
-  db:
-    image: pgvector/pgvector:pg16
+  wordpress-db:
+    image: mysql:8.0
+    container_name: ai-ebot-wordpress-db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: aiebot
-    ports:
-      - "5433:5432"
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+      MYSQL_ROOT_PASSWORD: rootsecret
     volumes:
-      - aiebot_pg:/var/lib/postgresql/data
+      - wordpress_db_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-u', 'root', '-prootsecret']
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+
+  wordpress:
+    image: wordpress:6.7-php8.2-apache
+    container_name: ai-ebot-wordpress
+    restart: unless-stopped
+    ports:
+      - '9080:80'
+    environment:
+      WORDPRESS_DB_HOST: wordpress-db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      # Overrides DB siteurl/home so home_url() matches the published port (AI Ebot registers this URL on the API).
+      WORDPRESS_CONFIG_EXTRA: |
+        define( 'WP_HOME', 'http://localhost:9080' );
+        define( 'WP_SITEURL', 'http://localhost:9080' );
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    volumes:
+      - ./wordpress:/var/www/html
+      - ./wp-ai-ebot:/var/www/html/wp-content/plugins/wp-ai-ebot
+      # 100MB uploads (CSV imports, media) — requires: docker compose up -d --force-recreate wordpress
+      - ./docker/php-uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+    depends_on:
+      wordpress-db:
+        condition: service_healthy
 
 volumes:
-  aiebot_pg:
+  wordpress_db_data:

@@ -1,7 +1,16 @@
 node_modules/
+vendor/
 dist/
 cdk.out/
 .env
 .env.*
+.env.local
 *.log
+*.zip
 .DS_Store
+.idea/
+.vscode/
+*.swp
+
+# WordPress (downloaded into this folder on first `docker compose up`)
+wordpress/

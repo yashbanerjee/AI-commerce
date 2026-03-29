@@ -1,0 +1,10 @@
+# Deploy this service with root directory set to `server/` (or run build/start from ./server).
+# Requires PostgreSQL with the `vector` extension (pgvector). On Railway, add the Postgres plugin
+# and set DATABASE_URL on this service.
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install && npm run build"
+
+[deploy]
+startCommand = "npm start"

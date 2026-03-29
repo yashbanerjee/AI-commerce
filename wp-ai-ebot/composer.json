@@ -1,0 +1,14 @@
+{
+    "name": "ai-ebot/wp-ai-ebot",
+    "description": "Storefront AI chat for WooCommerce via an AI Ebot-compatible API service",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "autoload": {
+        "psr-4": {
+            "AI_Ebot\\": "includes/"
+        }
+    },
+    "require": {
+        "php": ">=7.4"
+    }
+}
