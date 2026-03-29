@@ -233,7 +233,7 @@ export async function handleIngest(req: Request, res: Response): Promise<void> {
       });
       const indexed_product_count = await countDistinctIndexedProducts(c, tenant.id);
       return {
-        err: null as const,
+        err: null,
         n,
         indexed_product_count,
         max_indexed_products: maxProducts,
@@ -718,7 +718,7 @@ export async function handleAdminTenantBillingPatch(req: Request, res: Response)
         }
       }
       const updated = await updateTenantBillingManual(c, tenantId, billing_plan_slug, subscription_status);
-      return updated ? { err: null as const } : { err: 'tenant_not_found' as const };
+      return updated ? { err: null } : { err: 'tenant_not_found' as const };
     });
 
     if (ok.err === 'unknown_plan') {
