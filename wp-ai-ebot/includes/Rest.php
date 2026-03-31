@@ -25,6 +25,62 @@ final class Rest
     public function init(): void
     {
         add_action('rest_api_init', [$this, 'register_routes']);
+        /** After {@see rest_cookie_check_errors} (priority 99): bootstrap must work without a prior X-WP-Nonce for logged-in users. */
+        add_filter('rest_authentication_errors', [$this, 'maybe_allow_bootstrap_without_rest_cookie_nonce'], 100);
+    }
+
+    /**
+     * Logged-in visitors send session cookies; WordPress then requires X-WP-Nonce on REST requests.
+     * Bootstrap exists to *issue* that nonce, so we clear cookie-nonce failures for GET bootstrap only.
+     *
+     * @param bool|\WP_Error|null|mixed $errors
+     * @return bool|\WP_Error|null|mixed
+     */
+    public function maybe_allow_bootstrap_without_rest_cookie_nonce($errors)
+    {
+        if ($errors === true || $errors === null || $errors === false) {
+            return $errors;
+        }
+        if (! $errors instanceof \WP_Error) {
+            return $errors;
+        }
+        if (! self::is_rest_bootstrap_get_request()) {
+            return $errors;
+        }
+        $code = $errors->get_error_code();
+        if ($code === 'rest_cookie_invalid_nonce') {
+            return true;
+        }
+        if ($code === 'rest_forbidden') {
+            $msg = strtolower($errors->get_error_message());
+            if (strpos($msg, 'cookie') !== false || strpos($msg, 'nonce') !== false) {
+                return true;
+            }
+        }
+
+        return $errors;
+    }
+
+    private static function is_rest_bootstrap_get_request(): bool
+    {
+        $method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : '';
+        if ($method !== 'GET' && $method !== 'HEAD') {
+            return false;
+        }
+        $uri = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+        if (strpos($uri, 'ai-ebot/v1/bootstrap') !== false) {
+            return true;
+        }
+        // Plain permalinks: ?rest_route=/ai-ebot/v1/bootstrap
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        if (isset($_GET['rest_route']) && is_string($_GET['rest_route'])) {
+            $rr = trim($_GET['rest_route'], '/');
+            if ($rr === 'ai-ebot/v1/bootstrap') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function register_routes(): void
@@ -105,13 +161,11 @@ final class Rest
      */
     public function handle_chat(\WP_REST_Request $request)
     {
-        Chat_Store::maybe_install();
-
         $client = new Server_Client();
         if (! $client->is_configured()) {
             return new \WP_Error(
                 'ai_ebot_not_configured',
-                __('AI Ebot is not connected. Complete setup under Connection.', 'wp-ai-ebot'),
+                __('AI Ebot is not connected. Complete setup on the Overview tab.', 'wp-ai-ebot'),
                 ['status' => 503]
             );
         }
@@ -123,23 +177,22 @@ final class Rest
 
         $remote = isset($_SERVER['REMOTE_ADDR']) ? (string) $_SERVER['REMOTE_ADDR'] : '';
         $ip_hash = $remote !== '' ? hash('sha256', $remote . wp_salt('auth')) : null;
-        $wp_user_id = is_user_logged_in() ? get_current_user_id() : null;
+        $wp_user_id = is_user_logged_in() ? (int) get_current_user_id() : null;
 
         $public_session = sanitize_text_field((string) $request->get_param('session_id'));
-        $session_row = ($public_session !== '' && Chat_Store::is_valid_public_id($public_session))
-            ? Chat_Store::find_by_public_id($public_session)
-            : null;
 
-        if ($session_row === null) {
-            $created = Chat_Store::create_session($wp_user_id, $ip_hash);
-            $session_db_id = $created['id'];
-            $public_session = $created['public_id'];
-        } else {
-            $session_db_id = (int) $session_row->id;
-            $public_session = (string) $session_row->public_id;
+        $preset = sanitize_key((string) get_option(Tone::OPT_PRESET, 'custom'));
+        $allowed_presets = array_keys(Tone::preset_labels());
+        if (! in_array($preset, $allowed_presets, true)) {
+            $preset = 'custom';
+        }
+        $tone_notes = trim((string) get_option('ai_ebot_tone', ''));
+        if ($tone_notes !== '' && function_exists('mb_substr')) {
+            $tone_notes = mb_substr($tone_notes, 0, 500);
+        } elseif ($tone_notes !== '') {
+            $tone_notes = substr($tone_notes, 0, 500);
         }
 
-        $tone = get_option('ai_ebot_tone', '');
         $history = $request->get_param('history');
         if (! is_array($history)) {
             $history = [];
@@ -147,9 +200,14 @@ final class Rest
 
         $payload = [
             'message' => $message,
-            'tone' => is_string($tone) ? $tone : '',
-            'history' => $history,
+            /** Compact style selector + optional notes (avoids sending long preset boilerplate on every chat). */
+            'tone_preset' => $preset,
+            'tone_notes' => $tone_notes,
             'strict_grounding' => (bool) get_option('ai_ebot_strict_grounding', true),
+            'session_id' => $public_session,
+            'wp_user_id' => $wp_user_id,
+            'ip_hash' => $ip_hash,
+            'history' => $history,
         ];
         if (Status::is_woocommerce_active()) {
             $payload['published_products'] = Status::published_product_count();
@@ -188,15 +246,7 @@ final class Rest
             return new \WP_Error('ai_ebot_server', $err, $data);
         }
 
-        $body = $result['body'];
-        if (is_array($body)) {
-            $answer = isset($body['answer']) ? (string) $body['answer'] : '';
-            Chat_Store::append_message($session_db_id, 'user', $message);
-            Chat_Store::append_message($session_db_id, 'assistant', $answer);
-            $body['session_id'] = $public_session;
-        }
-
-        return rest_ensure_response($body);
+        return rest_ensure_response($result['body']);
     }
 
     /**
@@ -207,7 +257,14 @@ final class Rest
      */
     public function handle_session_messages(\WP_REST_Request $request)
     {
-        Chat_Store::maybe_install();
+        $client = new Server_Client();
+        if (! $client->is_configured()) {
+            return new \WP_Error(
+                'ai_ebot_not_configured',
+                __('AI Ebot is not connected. Complete setup on the Overview tab.', 'wp-ai-ebot'),
+                ['status' => 503]
+            );
+        }
 
         $public_id = (string) $request->get_param('public_id');
         if (! Chat_Store::is_valid_public_id($public_id)) {
@@ -218,39 +275,49 @@ final class Rest
             );
         }
 
-        $session = Chat_Store::find_by_public_id($public_id);
-        if ($session === null) {
-            return new \WP_Error(
-                'ai_ebot_session_not_found',
-                __('Chat session not found.', 'wp-ai-ebot'),
-                ['status' => 404]
-            );
-        }
+        $viewer = is_user_logged_in() ? (int) get_current_user_id() : 0;
+        $path = '/v1/chat/session/' . rawurlencode($public_id) . '/messages';
+        $result = $client->get($path, 30, true, ['viewer_wp_user_id' => $viewer]);
 
-        $owner_id = isset($session->user_id) ? (int) $session->user_id : 0;
-        if ($owner_id > 0) {
-            if (! is_user_logged_in() || (int) get_current_user_id() !== $owner_id) {
+        if (! $result['ok']) {
+            $code = (int) $result['code'];
+            if ($code === 404) {
+                return new \WP_Error(
+                    'ai_ebot_session_not_found',
+                    __('Chat session not found.', 'wp-ai-ebot'),
+                    ['status' => 404]
+                );
+            }
+            if ($code === 403) {
                 return new \WP_Error(
                     'ai_ebot_session_forbidden',
                     __('You cannot load this chat history.', 'wp-ai-ebot'),
                     ['status' => 403]
                 );
             }
+
+            return new \WP_Error(
+                'ai_ebot_server',
+                __('Could not load chat history.', 'wp-ai-ebot'),
+                ['status' => $code >= 400 && $code < 600 ? $code : 502]
+            );
         }
 
-        $rows = Chat_Store::get_messages((int) $session->id, 500);
-        $messages = [];
-        foreach ($rows as $row) {
-            $role = $row->role === 'assistant' ? 'assistant' : 'user';
-            $messages[] = [
-                'role' => $role,
-                'content' => (string) $row->content,
-            ];
+        $body = $result['body'];
+        if (! is_array($body)) {
+            return new \WP_Error(
+                'ai_ebot_server',
+                __('Invalid response from AI Ebot service.', 'wp-ai-ebot'),
+                ['status' => 502]
+            );
         }
+
+        $sid = isset($body['session_id']) ? (string) $body['session_id'] : $public_id;
+        $messages = isset($body['messages']) && is_array($body['messages']) ? $body['messages'] : [];
 
         return rest_ensure_response(
             [
-                'session_id' => $public_id,
+                'session_id' => $sid,
                 'messages' => $messages,
             ]
         );

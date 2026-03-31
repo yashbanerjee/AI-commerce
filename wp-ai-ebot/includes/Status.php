@@ -111,6 +111,11 @@ final class Status
 
         delete_option(self::OPT_LAST_INGEST_ERROR);
 
+        $tid = (string) get_option('ai_ebot_tenant_id', '');
+        if ($tid !== '') {
+            self::invalidate_billing_cache($tid);
+        }
+
         if (is_array($body) && isset($body['indexed_product_count'])) {
             update_option(self::OPT_PRODUCTS_INDEXED, max(0, (int) $body['indexed_product_count']));
         }
@@ -153,7 +158,7 @@ final class Status
             return __('Activate WooCommerce to use AI Ebot.', 'wp-ai-ebot');
         }
         if (! self::has_registered_credentials()) {
-            return __('Use Connection to register this site with AI Ebot. Your Site ID and service access are created automatically.', 'wp-ai-ebot');
+            return __('Use Overview → Connect to AI Ebot to register this site. Your Site ID and service access are created automatically.', 'wp-ai-ebot');
         }
 
         return '';

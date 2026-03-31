@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace AI_Ebot;
 
 /**
- * Builds a compact catalog outline for chat (categories, brands, product links) so the model can answer
- * "what do you have" without relying on vector retrieval alone.
+ * Builds a compact store outline for chat: categories, brands, tags, and promotion signals only.
+ * Individual products are not listed here — the bot must recommend products from the AI index (retrieval), not from a full published-product list.
  */
 final class Catalog_Context
 {
@@ -35,7 +35,7 @@ final class Catalog_Context
 
     public static function maybe_bust_on_term_change(int $term_id, int $tt_id, string $taxonomy): void
     {
-        if ($taxonomy === 'product_cat' || self::is_brand_taxonomy($taxonomy)) {
+        if ($taxonomy === 'product_cat' || $taxonomy === 'product_tag' || self::is_brand_taxonomy($taxonomy)) {
             self::bust_cache();
         }
     }
@@ -73,6 +73,30 @@ final class Catalog_Context
         return $raw;
     }
 
+    /**
+     * Site identity so the model can describe overall positioning (not only products).
+     *
+     * @return string Non-empty prefix with trailing newlines, or "".
+     */
+    private static function store_identity_prefix(): string
+    {
+        $lines = [];
+        $name = trim(wp_strip_all_tags((string) get_bloginfo('name')));
+        if ($name !== '') {
+            $lines[] = 'STORE NAME: ' . $name;
+        }
+        $desc = trim(wp_strip_all_tags((string) get_bloginfo('description')));
+        if ($desc !== '') {
+            $lines[] = 'SITE TAGLINE / SHORT DESCRIPTION (WordPress): ' . $desc;
+        }
+
+        if ($lines === []) {
+            return '';
+        }
+
+        return implode("\n", $lines) . "\n\n";
+    }
+
     private static function build_uncached(): string
     {
         $parts = [];
@@ -105,58 +129,23 @@ final class Catalog_Context
             $parts[] = 'BRANDS: (none detected — store may use only categories or custom attributes)';
         }
 
-        $limit = (int) apply_filters('ai_ebot_chat_catalog_product_limit', 4000);
-        $limit = max(50, min(20000, $limit));
-
-        $total_pub = 0;
-        $count_obj = wp_count_posts('product');
-        if ($count_obj && isset($count_obj->publish)) {
-            $total_pub = (int) $count_obj->publish;
+        $tag_names = self::collect_product_tag_names();
+        if ($tag_names !== []) {
+            natcasesort($tag_names);
+            $tag_names = array_values(array_unique($tag_names));
+            $parts[] = 'PRODUCT TAGS (' . count($tag_names) . '): ' . implode(', ', $tag_names);
+        } else {
+            $parts[] = 'PRODUCT TAGS: (none or unused)';
         }
 
-        $types = (array) apply_filters(
-            'ai_ebot_chat_catalog_product_types',
-            ['simple', 'variable', 'grouped', 'external']
-        );
-
-        if (! function_exists('wc_get_products')) {
-            return implode("\n\n", $parts);
+        $sale_note = self::on_sale_summary_line();
+        if ($sale_note !== '') {
+            $parts[] = $sale_note;
         }
 
-        $product_ids = wc_get_products([
-            'status' => 'publish',
-            'limit' => $limit,
-            'orderby' => 'title',
-            'order' => 'ASC',
-            'return' => 'ids',
-            'type' => $types,
-        ]);
+        $parts[] = 'INDIVIDUAL PRODUCTS: Not listed in this outline. Name, describe, or recommend only products that appear in RETRIEVAL CONTEXT (AI-indexed products). Do not invent a full product list from category/tag names alone.';
 
-        $lines = [];
-        if (is_array($product_ids)) {
-            foreach ($product_ids as $pid) {
-                $pid = (int) $pid;
-                if ($pid <= 0) {
-                    continue;
-                }
-                $title = get_the_title($pid);
-                $url = get_permalink($pid);
-                if (! is_string($title) || $title === '' || ! is_string($url) || $url === '') {
-                    continue;
-                }
-                $lines[] = '- [' . self::escape_markdown_link_label($title) . '](' . $url . ')';
-            }
-        }
-
-        $listed = count($lines);
-        $parts[] = 'PRODUCTS (' . $listed . ' lines; WooCommerce reports ' . $total_pub . ' published products):';
-        $parts[] = implode("\n", $lines);
-
-        if ($total_pub > $listed) {
-            $parts[] = '(Outline lists ' . $listed . ' of ' . $total_pub . ' published products due to a size cap; tell shoppers the shop has more and they can browse the catalog.)';
-        }
-
-        $blob = implode("\n\n", $parts);
+        $blob = self::store_identity_prefix() . implode("\n\n", $parts);
 
         $max_bytes = (int) apply_filters('ai_ebot_chat_catalog_max_bytes', 240000);
         $max_bytes = max(50_000, min(1_500_000, $max_bytes));
@@ -165,12 +154,53 @@ final class Catalog_Context
             $blob .= "\n\n(Catalog outline truncated for size; invite shoppers to use the shop catalog or search.)";
         }
 
-        return $blob;
+        /**
+         * @param string $blob Full catalog outline including store identity.
+         */
+        return (string) apply_filters('ai_ebot_chat_catalog_context', $blob);
     }
 
-    private static function escape_markdown_link_label(string $title): string
+    /**
+     * WooCommerce on-sale count only — no product titles (those come from retrieval).
+     */
+    private static function on_sale_summary_line(): string
     {
-        return str_replace(['[', ']'], ['(', ')'], $title);
+        if (! function_exists('wc_get_product_ids_on_sale')) {
+            return '';
+        }
+        $ids = wc_get_product_ids_on_sale();
+        $n = is_array($ids) ? count($ids) : 0;
+        if ($n <= 0) {
+            return 'PROMOTIONS / ON SALE: (no products flagged on sale in WooCommerce, or not applicable.)';
+        }
+
+        return 'PROMOTIONS / ON SALE: About ' . $n . ' product(s) are currently marked on sale. Exact titles, prices, and links must come from RETRIEVAL CONTEXT, not guessed.';
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function collect_product_tag_names(): array
+    {
+        if (! taxonomy_exists('product_tag')) {
+            return [];
+        }
+        $terms = get_terms([
+            'taxonomy' => 'product_tag',
+            'hide_empty' => true,
+            'number' => 0,
+        ]);
+        if (is_wp_error($terms) || ! is_array($terms) || $terms === []) {
+            return [];
+        }
+        $out = [];
+        foreach ($terms as $t) {
+            if ($t instanceof \WP_Term) {
+                $out[] = $t->name;
+            }
+        }
+
+        return $out;
     }
 
     /**

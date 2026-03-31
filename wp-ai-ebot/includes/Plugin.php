@@ -23,7 +23,6 @@ final class Plugin
     public function init(): void
     {
         Config::maybe_migrate_legacy_options();
-        Chat_Store::maybe_install();
         Privacy::init();
         Telemetry::init();
         Catalog_Context::init();

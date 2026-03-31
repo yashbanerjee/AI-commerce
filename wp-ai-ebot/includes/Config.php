@@ -14,7 +14,9 @@ final class Config
      * (or legacy AI_EBOT_CLOUD_BASE_URL), e.g. http://host.docker.internal:8787 or http://127.0.0.1:8787.
      * Filters: ai_ebot_server_base_url, ai_ebot_cloud_base_url.
      */
-    private const DEFAULT_SERVER_BASE_URL = 'https://ai-commerce-production.up.railway.app';
+    // private const DEFAULT_SERVER_BASE_URL = 'https://ai-commerce-production.up.railway.app';
+    private const DEFAULT_SERVER_BASE_URL = 'http://host.docker.internal:8787';
+
 
     public const OPT_SERVER_API_KEY = 'ai_ebot_server_api_key';
 

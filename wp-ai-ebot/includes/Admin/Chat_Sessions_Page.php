@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace AI_Ebot\Admin;
 
 use AI_Ebot\Chat_Store;
+use AI_Ebot\Server_Client;
 
 /**
- * Customer chat sessions UI (embedded under AI Ebot → Chat sessions tab).
+ * Customer chat sessions UI (embedded under AI Ebot → Chat sessions tab); data from the AI Ebot API.
  */
 final class Chat_Sessions_Page
 {
@@ -59,6 +60,7 @@ final class Chat_Sessions_Page
         $session_public = isset($_GET['session']) ? sanitize_text_field(wp_unslash((string) $_GET['session'])) : '';
         if ($session_public !== '' && Chat_Store::is_valid_public_id($session_public)) {
             self::render_detail($session_public);
+
             return;
         }
 
@@ -75,16 +77,50 @@ final class Chat_Sessions_Page
 
     private static function render_list(): void
     {
+        $client = new Server_Client();
+        if (! $client->is_configured()) {
+            echo '<p class="description">' . esc_html__(
+                'Connect AI Ebot on the Overview tab to load chat sessions from the service.',
+                'wp-ai-ebot'
+            ) . '</p>';
+
+            return;
+        }
+
         // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $paged = isset($_GET['paged']) ? max(1, (int) $_GET['paged']) : 1;
         $offset = ($paged - 1) * self::PER_PAGE;
-        $total = Chat_Store::count_sessions();
-        $rows = Chat_Store::list_sessions($offset, self::PER_PAGE);
+
+        $result = $client->get(
+            '/v1/tenant/chat-sessions',
+            30,
+            true,
+            [
+                'limit' => self::PER_PAGE,
+                'offset' => $offset,
+            ]
+        );
+
+        if (! $result['ok']) {
+            echo '<p>' . esc_html__('Could not load sessions from the AI Ebot service.', 'wp-ai-ebot') . '</p>';
+
+            return;
+        }
+
+        $body = $result['body'];
+        if (! is_array($body)) {
+            echo '<p>' . esc_html__('Invalid response from the AI Ebot service.', 'wp-ai-ebot') . '</p>';
+
+            return;
+        }
+
+        $total = isset($body['total']) ? (int) $body['total'] : 0;
+        $rows = isset($body['sessions']) && is_array($body['sessions']) ? $body['sessions'] : [];
         $total_pages = (int) ceil(max(1, $total) / self::PER_PAGE);
 
         ?>
         <h2 class="title"><?php esc_html_e('Chat sessions', 'wp-ai-ebot'); ?></h2>
-        <p class="description"><?php esc_html_e('Conversations from the storefront chat widget (saved after each successful reply).', 'wp-ai-ebot'); ?></p>
+        <p class="description"><?php esc_html_e('Conversations from the storefront widget, stored on your AI Ebot service.', 'wp-ai-ebot'); ?></p>
         <?php if ($total === 0) : ?>
             <p><?php esc_html_e('No sessions yet.', 'wp-ai-ebot'); ?></p>
         <?php else : ?>
@@ -101,13 +137,22 @@ final class Chat_Sessions_Page
                 <tbody>
                     <?php foreach ($rows as $row) : ?>
                         <?php
-                        $uid = isset($row->user_id) ? (int) $row->user_id : 0;
-                        $mc = isset($row->message_count) ? (int) $row->message_count : 0;
-                        $pub = (string) $row->public_id;
+                        if (! is_array($row)) {
+                            continue;
+                        }
+                        $uid = isset($row['shopper_wp_user_id']) && $row['shopper_wp_user_id'] !== null
+                            ? (int) $row['shopper_wp_user_id']
+                            : 0;
+                        $mc = isset($row['message_count']) ? (int) $row['message_count'] : 0;
+                        $pub = isset($row['public_id']) ? (string) $row['public_id'] : '';
+                        if ($pub === '') {
+                            continue;
+                        }
+                        $updated_at = isset($row['updated_at']) ? (string) $row['updated_at'] : '';
                         $detail_url = self::sessions_base_url(['session' => $pub]);
                         ?>
                         <tr>
-                            <td><?php echo esc_html(self::fmt_time((string) $row->updated_at)); ?></td>
+                            <td><?php echo esc_html(self::fmt_iso_time($updated_at)); ?></td>
                             <td>
                                 <?php
                                 if ($uid > 0) {
@@ -149,16 +194,43 @@ final class Chat_Sessions_Page
 
     private static function render_detail(string $public_id): void
     {
-        $session = Chat_Store::find_by_public_id($public_id);
-        if ($session === null) {
-            echo '<p>' . esc_html__('Session not found.', 'wp-ai-ebot') . '</p>';
+        $client = new Server_Client();
+        if (! $client->is_configured()) {
+            echo '<p class="description">' . esc_html__(
+                'Connect AI Ebot on the Overview tab to load this session.',
+                'wp-ai-ebot'
+            ) . '</p>';
 
             return;
         }
 
+        $path = '/v1/tenant/chat-sessions/' . rawurlencode($public_id) . '/messages';
+        $result = $client->get($path, 45, true);
+
+        if (! $result['ok']) {
+            if ((int) $result['code'] === 404) {
+                echo '<p>' . esc_html__('Session not found.', 'wp-ai-ebot') . '</p>';
+            } else {
+                echo '<p>' . esc_html__('Could not load this session from the AI Ebot service.', 'wp-ai-ebot') . '</p>';
+            }
+
+            return;
+        }
+
+        $body = $result['body'];
+        if (! is_array($body)) {
+            echo '<p>' . esc_html__('Invalid response from the AI Ebot service.', 'wp-ai-ebot') . '</p>';
+
+            return;
+        }
+
+        $messages = isset($body['messages']) && is_array($body['messages']) ? $body['messages'] : [];
+        $uid = isset($body['shopper_wp_user_id']) && $body['shopper_wp_user_id'] !== null
+            ? (int) $body['shopper_wp_user_id']
+            : 0;
+        $created_at = isset($body['created_at']) ? (string) $body['created_at'] : '';
+
         $list_url = self::sessions_base_url();
-        $messages = Chat_Store::get_messages((int) $session->id);
-        $uid = isset($session->user_id) ? (int) $session->user_id : 0;
 
         ?>
         <p><a href="<?php echo esc_url($list_url); ?>">&larr; <?php esc_html_e('All chat sessions', 'wp-ai-ebot'); ?></a></p>
@@ -168,7 +240,7 @@ final class Chat_Sessions_Page
             <code><?php echo esc_html($public_id); ?></code>
             &nbsp;·&nbsp;
             <strong><?php esc_html_e('Started:', 'wp-ai-ebot'); ?></strong>
-            <?php echo esc_html(self::fmt_time((string) $session->created_at)); ?>
+            <?php echo esc_html(self::fmt_iso_time($created_at)); ?>
             &nbsp;·&nbsp;
             <strong><?php esc_html_e('Visitor:', 'wp-ai-ebot'); ?></strong>
             <?php
@@ -186,17 +258,23 @@ final class Chat_Sessions_Page
             <?php else : ?>
                 <?php foreach ($messages as $m) : ?>
                     <?php
-                    $is_user = ($m->role ?? '') === 'user';
+                    if (! is_array($m)) {
+                        continue;
+                    }
+                    $role = isset($m['role']) ? (string) $m['role'] : '';
+                    $is_user = $role === 'user';
                     $align = $is_user ? 'right' : 'left';
                     $bg = $is_user ? '#e8f0fe' : '#f0f2f5';
+                    $content = isset($m['content']) ? (string) $m['content'] : '';
+                    $ts = isset($m['created_at']) ? (string) $m['created_at'] : '';
                     ?>
                     <div style="text-align:<?php echo esc_attr($align); ?>;margin-bottom:0.75rem;">
                         <div style="display:inline-block;max-width:95%;text-align:left;padding:0.5rem 0.75rem;border-radius:10px;background:<?php echo esc_attr($bg); ?>;font-size:13px;">
                             <div style="font-size:10px;text-transform:uppercase;opacity:0.7;margin-bottom:4px;">
                                 <?php echo $is_user ? esc_html__('Customer', 'wp-ai-ebot') : esc_html__('Assistant', 'wp-ai-ebot'); ?>
-                                · <?php echo esc_html(self::fmt_time((string) $m->created_at)); ?>
+                                · <?php echo esc_html(self::fmt_iso_time($ts)); ?>
                             </div>
-                            <div style="white-space:pre-wrap;word-break:break-word;"><?php echo esc_html((string) $m->content); ?></div>
+                            <div style="white-space:pre-wrap;word-break:break-word;"><?php echo esc_html($content); ?></div>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -205,11 +283,17 @@ final class Chat_Sessions_Page
         <?php
     }
 
-    private static function fmt_time(string $mysql): string
+    private static function fmt_iso_time(string $iso): string
     {
+        if ($iso === '') {
+            return '—';
+        }
+        $ts = strtotime($iso);
+        if ($ts === false) {
+            return $iso;
+        }
         $fmt = (string) get_option('date_format') . ' ' . (string) get_option('time_format');
-        $out = mysql2date($fmt, $mysql, true);
 
-        return $out !== '' && $out !== false ? (string) $out : $mysql;
+        return wp_date($fmt, $ts);
     }
 }

@@ -8,6 +8,7 @@ use AI_Ebot\Server_Client;
 use AI_Ebot\Config;
 use AI_Ebot\Status;
 use AI_Ebot\Telemetry;
+use AI_Ebot\Tone;
 
 /**
  * Admin settings, registration, custom chunks, reindex.
@@ -17,7 +18,7 @@ final class Settings
     private const OPTION_GROUP = 'ai_ebot_settings';
 
     /** @var list<string> */
-    private const SETTINGS_TABS = ['overview', 'connection', 'assistant', 'appearance', 'knowledge', 'sessions'];
+    private const SETTINGS_TABS = ['overview', 'catalog-index', 'assistant', 'appearance', 'knowledge', 'sessions'];
 
     private const TAB_DEFAULT = 'overview';
 
@@ -62,27 +63,112 @@ final class Settings
             true
         );
 
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $tab = isset($_GET['tab']) ? sanitize_key((string) wp_unslash($_GET['tab'])) : 'overview';
+        if ($tab === 'knowledge') {
+            wp_enqueue_script(
+                'ai-ebot-knowledge-pages',
+                AI_EBOT_PLUGIN_URL . 'public/js/knowledge-pages.js',
+                [],
+                AI_EBOT_VERSION,
+                true
+            );
+            wp_localize_script(
+                'ai-ebot-knowledge-pages',
+                'aiEbotKnowledgePages',
+                [
+                    'ajaxUrl' => admin_url('admin-ajax.php'),
+                    'nonce' => wp_create_nonce('ai_ebot_knowledge_pages'),
+                    'i18n' => [
+                        'saving' => __('Saving list…', 'wp-ai-ebot'),
+                        /* translators: 1: pages indexed so far, 2: total pages in this run */
+                        'indexingProgress' => __('%1$d of %2$d pages sent to the AI index…', 'wp-ai-ebot'),
+                        'success' => __('Done.', 'wp-ai-ebot'),
+                        'errorGeneric' => __('Something went wrong.', 'wp-ai-ebot'),
+                    ],
+                ]
+            );
+        }
+
+        if ($tab === 'catalog-index') {
+            wp_enqueue_script(
+                'ai-ebot-catalog-index',
+                AI_EBOT_PLUGIN_URL . 'public/js/catalog-index.js',
+                [],
+                AI_EBOT_VERSION,
+                true
+            );
+            wp_localize_script(
+                'ai-ebot-catalog-index',
+                'aiEbotCatalogIndex',
+                [
+                    'ajaxUrl' => admin_url('admin-ajax.php'),
+                    'nonce' => wp_create_nonce('ai_ebot_catalog_index'),
+                    'curatedReindexNonce' => wp_create_nonce('ai_ebot_curated_reindex'),
+                    'storeStructureNonce' => wp_create_nonce('ai_ebot_store_structure_sync'),
+                    'i18n' => [
+                        'sending' => __('Sending to AI index…', 'wp-ai-ebot'),
+                        'indexingProgress' => __('%1$d of %2$d products sent…', 'wp-ai-ebot'),
+                        'removing' => __('Removing from AI index…', 'wp-ai-ebot'),
+                        'successSend' => __('Products updated.', 'wp-ai-ebot'),
+                        'successRemove' => __('Removed from the list.', 'wp-ai-ebot'),
+                        'errorGeneric' => __('Something went wrong.', 'wp-ai-ebot'),
+                        'noneSelected' => __('Select at least one product.', 'wp-ai-ebot'),
+                        'reindexing' => __('Indexing…', 'wp-ai-ebot'),
+                        'reindexProgress' => __('%1$d of %2$d listed products sent…', 'wp-ai-ebot'),
+                        'reindexOrphanProgress' => __('Cleaning old catalog products from AI index (%1$d of %2$d)…', 'wp-ai-ebot'),
+                        'reindexComplete' => __('Reindex of listed products complete.', 'wp-ai-ebot'),
+                        'reindexError' => __('Reindex failed.', 'wp-ai-ebot'),
+                        'storeStructureWorking' => __('Syncing store structure…', 'wp-ai-ebot'),
+                        'storeStructureDone' => __('Store structure synced.', 'wp-ai-ebot'),
+                        'removeAllConfirm' => __(
+                            'Remove every product in this list from the AI product index and clear the list? Other indexed content on the service (pages, assistant, custom knowledge) is not removed.',
+                            'wp-ai-ebot'
+                        ),
+                        'removeAllWorking' => __('Removing all listed products from the AI index…', 'wp-ai-ebot'),
+                    ],
+                ]
+            );
+        }
+
+        if ($tab === 'assistant') {
+            wp_enqueue_script(
+                'ai-ebot-assistant-index',
+                AI_EBOT_PLUGIN_URL . 'public/js/assistant-index.js',
+                [],
+                AI_EBOT_VERSION,
+                true
+            );
+            wp_localize_script(
+                'ai-ebot-assistant-index',
+                'aiEbotAssistantIndex',
+                [
+                    'ajaxUrl' => admin_url('admin-ajax.php'),
+                    'nonce' => wp_create_nonce('ai_ebot_assistant_index'),
+                    'presetName' => Tone::OPT_PRESET,
+                    'i18n' => [
+                        'saving' => __('Saving and indexing…', 'wp-ai-ebot'),
+                        'success' => __('Done.', 'wp-ai-ebot'),
+                        'errorGeneric' => __('Something went wrong.', 'wp-ai-ebot'),
+                    ],
+                ]
+            );
+        }
+
         wp_localize_script(
             'ai-ebot-admin',
             'aiEbotAdmin',
             [
                 'ajaxUrl' => admin_url('admin-ajax.php'),
-                'reindexNonce' => wp_create_nonce('ai_ebot_reindex'),
-                'bgReindexNonce' => wp_create_nonce('ai_ebot_bg_reindex'),
+                'clearVectorIndexNonce' => wp_create_nonce('ai_ebot_clear_vector_index'),
                 'i18n' => [
-                    'indexing' => __('Indexing…', 'wp-ai-ebot'),
-                    /* translators: 1: indexed so far, 2: total published products */
-                    'indexingProgress' => __('%1$d of %2$d products indexed…', 'wp-ai-ebot'),
-                    'indexingExtras' => __('Indexing pages & custom knowledge…', 'wp-ai-ebot'),
-                    'success' => __('Reindex complete.', 'wp-ai-ebot'),
-                    'errorGeneric' => __('Reindex failed.', 'wp-ai-ebot'),
-                    /* translators: %s: number of products */
-                    'productCountSuffix' => __('(%s products)', 'wp-ai-ebot'),
-                    'bgStarted' => __('Background reindex scheduled. Progress updates here; you can leave this page.', 'wp-ai-ebot'),
-                    'bgRunning' => __('Background reindex: %s', 'wp-ai-ebot'),
-                    'bgError' => __('Background reindex stopped: %s', 'wp-ai-ebot'),
-                    'bgDone' => __('Background reindex finished.', 'wp-ai-ebot'),
-                    'bgCronHint' => __('If progress stalls, ensure WP-Cron runs (traffic to the site or a real server cron hitting wp-cron.php).', 'wp-ai-ebot'),
+                    'clearIndexConfirm' => __(
+                        'This removes every chunk for this site on the AI Ebot service (products, pages, assistant text, etc.), clears the Product index list, and stops any background reindex. Continue?',
+                        'wp-ai-ebot'
+                    ),
+                    'clearIndexWorking' => __('Clearing AI index…', 'wp-ai-ebot'),
+                    'clearIndexDone' => __('AI index cleared. Use the Product index tab when you are ready to send products again.', 'wp-ai-ebot'),
+                    'clearIndexError' => __('Could not clear the AI index.', 'wp-ai-ebot'),
                 ],
                 'indexStatusStrings' => [
                     /* translators: 1: sent so far, 2: total published (during live reindex) */
@@ -95,7 +181,7 @@ final class Settings
                     'reindexNever' => '—',
                     'syncSucceeded' => __('Succeeded', 'wp-ai-ebot'),
                     'syncFailed' => __('Failed', 'wp-ai-ebot'),
-                    'hintNewProducts' => __('Counts can differ if you added products after the last reindex. Run reindex again to refresh.', 'wp-ai-ebot'),
+                    'hintNewProducts' => __('Counts can differ after catalog changes. Use “Reindex listed products” on the Product index tab to refresh.', 'wp-ai-ebot'),
                 ],
             ]
         );
@@ -118,6 +204,11 @@ final class Settings
     {
         // Service API key (ai_ebot_server_api_key) and ai_ebot_tenant_id are set only by run_server_registration() — do not
         // register_setting them: same option_group is saved from other forms and could clear hidden options.
+        register_setting(self::OPTION_GROUP, 'ai_ebot_tone_preset', [
+            'type' => 'string',
+            'sanitize_callback' => [$this, 'sanitize_tone_preset'],
+            'default' => 'custom',
+        ]);
         register_setting(self::OPTION_GROUP, 'ai_ebot_tone', [
             'type' => 'string',
             'sanitize_callback' => 'sanitize_textarea_field',
@@ -129,6 +220,11 @@ final class Settings
         register_setting(self::OPTION_GROUP, 'ai_ebot_sync_page_ids_csv', [
             'type' => 'string',
             'sanitize_callback' => [$this, 'sanitize_page_ids_csv'],
+        ]);
+        register_setting(self::OPTION_GROUP, Catalog_Index_Tab::OPT_CURATED, [
+            'type' => 'string',
+            'sanitize_callback' => [$this, 'sanitize_page_ids_csv'],
+            'default' => '',
         ]);
         register_setting(self::OPTION_GROUP, 'ai_ebot_custom_chunks', [
             'type' => 'array',
@@ -160,6 +256,21 @@ final class Settings
     }
 
     /**
+     * @param mixed $value
+     */
+    public function sanitize_tone_preset($value): string
+    {
+        $v = is_string($value) ? sanitize_key($value) : 'custom';
+
+        return array_key_exists($v, Tone::preset_labels()) ? $v : 'custom';
+    }
+
+    public static function option_group(): string
+    {
+        return self::OPTION_GROUP;
+    }
+
+    /**
      * Connection form uses admin-post (not options.php) to avoid Settings API sanitize fatals on some hosts.
      */
     public function handle_save_connection(): void
@@ -170,7 +281,7 @@ final class Settings
         check_admin_referer('ai_ebot_save_connection');
 
         if (! Config::has_server_endpoint()) {
-            wp_safe_redirect(self::admin_tab_url('connection', ['ai_ebot_msg' => 'no_server_url']));
+            wp_safe_redirect(self::admin_tab_url('overview', ['ai_ebot_msg' => 'no_server_url']));
             exit;
         }
 
@@ -186,11 +297,11 @@ final class Settings
                 wp_strip_all_tags($e->getMessage()),
                 120
             );
-            wp_safe_redirect(self::admin_tab_url('connection', ['ai_ebot_msg' => 'connect_failed']));
+            wp_safe_redirect(self::admin_tab_url('overview', ['ai_ebot_msg' => 'connect_failed']));
             exit;
         }
 
-        wp_safe_redirect(self::admin_tab_url('connection', ['ai_ebot_msg' => 'connected']));
+        wp_safe_redirect(self::admin_tab_url('overview', ['ai_ebot_msg' => 'connected']));
         exit;
     }
 
@@ -416,7 +527,7 @@ final class Settings
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__('Reindex queued or completed on the service.', 'wp-ai-ebot') . '</p></div>';
         }
         if ($msg === 'not_configured') {
-            echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__('Complete AI Ebot setup under Connection first.', 'wp-ai-ebot') . '</p></div>';
+            echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__('Connect to AI Ebot on the Overview tab first.', 'wp-ai-ebot') . '</p></div>';
         }
         if ($msg === 'reindex_failed') {
             echo '<div class="notice notice-error is-dismissible"><p>' . esc_html__('Reindex failed — check Status for the last sync error, then try again.', 'wp-ai-ebot') . '</p></div>';
@@ -448,7 +559,7 @@ final class Settings
 
         if ($st === 'success') {
             echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__(
-                'AI Ebot: this site is linked to the service. If this URL was already registered, your existing account was reused; otherwise a new one was created. Check Connection for your Site ID.',
+                'AI Ebot: this site is linked to the service. If this URL was already registered, your existing account was reused; otherwise a new one was created. Check Overview for your Site ID.',
                 'wp-ai-ebot'
             ) . '</p></div>';
 
@@ -457,7 +568,7 @@ final class Settings
 
         if ($st === 'no_endpoint') {
             echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__(
-                'AI Ebot: no API base URL is configured. Set AI_EBOT_SERVER_BASE_URL in wp-config.php (or use the default from the plugin), then use Connection → Connect to AI Ebot.',
+                'AI Ebot: no API base URL is configured. Set AI_EBOT_SERVER_BASE_URL in wp-config.php (or use the default from the plugin), then use Overview → Connect to AI Ebot.',
                 'wp-ai-ebot'
             ) . '</p></div>';
 
@@ -473,7 +584,7 @@ final class Settings
                 'wp-ai-ebot'
             ) . $extra . ' ';
             echo esc_html__(
-                'Open AI Ebot → Connection and use “Connect to AI Ebot” (for example if this site URL was registered before with a different site secret).',
+                'Open AI Ebot → Overview and use “Connect to AI Ebot” (for example if this site URL was registered before with a different site secret).',
                 'wp-ai-ebot'
             );
             echo '</p></div>';
@@ -486,9 +597,24 @@ final class Settings
             return;
         }
 
-        $custom = get_option('ai_ebot_custom_chunks', []);
-        if (! is_array($custom)) {
-            $custom = [];
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        if (isset($_GET['tab'])) {
+            $legacy_tab = sanitize_key((string) wp_unslash($_GET['tab']));
+            if ($legacy_tab === 'connection' || $legacy_tab === 'indexed') {
+                $args = [
+                    'page' => 'ai-ebot',
+                    'tab' => $legacy_tab === 'connection' ? 'overview' : 'knowledge',
+                ];
+                // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+                if (isset($_GET['ai_ebot_msg'])) {
+                    $args['ai_ebot_msg'] = sanitize_text_field(wp_unslash((string) $_GET['ai_ebot_msg']));
+                }
+                if ($legacy_tab === 'indexed' && isset($_GET['paged'])) {
+                    $args['ipp'] = max(1, (int) $_GET['paged']);
+                }
+                wp_safe_redirect(add_query_arg($args, admin_url('admin.php')));
+                exit;
+            }
         }
 
         $state = Status::chatbot_state();
@@ -505,7 +631,7 @@ final class Settings
                 ? (new Server_Client())->fetch_service_health()
                 : ['ok' => false, 'code' => 0];
             $extra_src = self::knowledge_extra_counts();
-            $tone_raw = trim((string) get_option('ai_ebot_tone', ''));
+            $tone_raw = trim(Tone::effective_tone());
         }
         $tone_preview = '';
         if ($tone_raw !== '') {
@@ -527,12 +653,16 @@ final class Settings
 
             <h2 class="nav-tab-wrapper wp-clearfix" style="margin-bottom:1rem;">
                 <a href="<?php echo esc_url(self::admin_tab_url('overview')); ?>" class="nav-tab <?php echo $tab === 'overview' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Overview', 'wp-ai-ebot'); ?></a>
-                <a href="<?php echo esc_url(self::admin_tab_url('connection')); ?>" class="nav-tab <?php echo $tab === 'connection' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Connection', 'wp-ai-ebot'); ?></a>
+                <a href="<?php echo esc_url(self::admin_tab_url('catalog-index')); ?>" class="nav-tab <?php echo $tab === 'catalog-index' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Product index', 'wp-ai-ebot'); ?></a>
                 <a href="<?php echo esc_url(self::admin_tab_url('assistant')); ?>" class="nav-tab <?php echo $tab === 'assistant' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Assistant', 'wp-ai-ebot'); ?></a>
                 <a href="<?php echo esc_url(self::admin_tab_url('appearance')); ?>" class="nav-tab <?php echo $tab === 'appearance' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Appearance', 'wp-ai-ebot'); ?></a>
                 <a href="<?php echo esc_url(self::admin_tab_url('knowledge')); ?>" class="nav-tab <?php echo $tab === 'knowledge' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Knowledge & index', 'wp-ai-ebot'); ?></a>
                 <a href="<?php echo esc_url(self::admin_tab_url('sessions')); ?>" class="nav-tab <?php echo $tab === 'sessions' ? 'nav-tab-active' : ''; ?>"><?php esc_html_e('Chat sessions', 'wp-ai-ebot'); ?></a>
             </h2>
+
+            <?php if ($tab === 'catalog-index') : ?>
+                <?php Catalog_Index_Tab::render(); ?>
+            <?php endif; ?>
 
             <?php if ($tab === 'overview') : ?>
             <p class="description" style="max-width:56rem;">
@@ -551,7 +681,11 @@ final class Settings
                 );
                 ?>
             </p>
-            <?php self::render_overview_metric_cards($billing_snap); ?>
+
+            <h2 class="title"><?php esc_html_e('Frontend shortcode', 'wp-ai-ebot'); ?></h2>
+            <p><code>[ai_ebot_chat title="<?php echo esc_attr(__('Ask us', 'wp-ai-ebot')); ?>"]</code></p>
+
+            <?php self::render_overview_metric_cards($billing_snap, $catalog); ?>
             <h2 class="title"><?php esc_html_e('Status', 'wp-ai-ebot'); ?></h2>
             <table class="widefat striped" style="max-width: 56rem;">
                 <thead>
@@ -562,16 +696,12 @@ final class Settings
                 </thead>
                 <tbody>
                     <tr>
-                        <td><strong><?php esc_html_e('Site ID', 'wp-ai-ebot'); ?></strong></td>
-                        <td>
-                            <code style="font-size:13px;"><?php echo esc_html(Status::tenant_id_display()); ?></code>
-                            <p class="description"><?php esc_html_e('Created automatically when you register this site with AI Ebot.', 'wp-ai-ebot'); ?></p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><strong><?php esc_html_e('Connection health', 'wp-ai-ebot'); ?></strong></td>
+                        <td><strong><?php esc_html_e('AI Ebot service', 'wp-ai-ebot'); ?></strong></td>
                         <td>
                             <?php
+                            if (Config::has_server_endpoint()) {
+                                echo '<p class="description" style="margin:0 0 0.35rem 0;"><code style="font-size:12px;">' . esc_html(Config::server_base_url()) . '</code></p>';
+                            }
                             if (! Config::has_server_endpoint()) {
                                 echo '<span style="color:#787c82;">' . esc_html__(
                                     'AI Ebot service URL is not configured for this site.',
@@ -580,7 +710,7 @@ final class Settings
                             } elseif (! Status::has_registered_credentials()) {
                                 if (! empty($svc_health['ok'])) {
                                     echo '<span style="color:#996800;">' . esc_html__(
-                                        'AI Ebot service is reachable, but this site is not registered yet.',
+                                        'Reachable — this site is not registered yet.',
                                         'wp-ai-ebot'
                                     ) . '</span>';
                                 } else {
@@ -596,20 +726,10 @@ final class Settings
                                         )
                                     );
                                 }
-                                echo '<p class="description">';
-                                echo wp_kses(
-                                    sprintf(
-                                        /* translators: %s: link to Connection tab */
-                                        __('Complete registration on the %s tab.', 'wp-ai-ebot'),
-                                        '<a href="' . esc_url(self::admin_tab_url('connection')) . '">' . esc_html__('Connection', 'wp-ai-ebot') . '</a>'
-                                    ),
-                                    [
-                                        'a' => [
-                                            'href' => true,
-                                        ],
-                                    ]
-                                );
-                                echo '</p>';
+                                echo '<p class="description">' . esc_html__(
+                                    'Complete registration using the Connect button in this table.',
+                                    'wp-ai-ebot'
+                                ) . '</p>';
                             } elseif (! empty($svc_health['ok'])) {
                                 echo '<span style="color:#007017;">' . esc_html__(
                                     'Connected — credentials are stored and the service responded successfully.',
@@ -645,24 +765,72 @@ final class Settings
                         </td>
                     </tr>
                     <tr>
+                        <td><strong><?php esc_html_e('Site ID', 'wp-ai-ebot'); ?></strong></td>
+                        <td>
+                            <code style="font-size:13px;"><?php echo esc_html(Status::tenant_id_display()); ?></code>
+                            <p class="description"><?php esc_html_e('Created automatically when you register this site with AI Ebot.', 'wp-ai-ebot'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong><?php esc_html_e('Connect to AI Ebot', 'wp-ai-ebot'); ?></strong></td>
+                        <td>
+                            <?php
+                            if (! Config::has_server_endpoint()) {
+                                echo '<p class="description" style="margin:0;">' . esc_html__(
+                                    'Set AI_EBOT_SERVER_BASE_URL in wp-config.php (or legacy AI_EBOT_CLOUD_BASE_URL), or ask your host, then reload this page.',
+                                    'wp-ai-ebot'
+                                ) . '</p>';
+                            } elseif (! Status::has_registered_credentials()) {
+                                echo '<p style="margin:0 0 0.75rem 0;">' . esc_html__(
+                                    'Link this site to receive a Site ID and service key. On activation, the plugin tries this automatically; use the button if that step did not complete.',
+                                    'wp-ai-ebot'
+                                ) . '</p>';
+                                if (empty($svc_health['ok'])) {
+                                    echo '<p class="description" style="margin:0 0 0.75rem 0;">' . esc_html__(
+                                        'The service did not respond to a health check — you can still try to connect if the URL is correct.',
+                                        'wp-ai-ebot'
+                                    ) . '</p>';
+                                }
+                                ?>
+                                <button type="submit" class="button button-primary" form="ai-ebot-register-form">
+                                    <?php esc_html_e('Connect to AI Ebot', 'wp-ai-ebot'); ?>
+                                </button>
+                                <?php
+                            } else {
+                                echo '<p class="description" style="margin:0;">' . esc_html__(
+                                    'Your site is registered. You can refresh registration below after a backup restore or URL change.',
+                                    'wp-ai-ebot'
+                                ) . '</p>';
+                            }
+                            ?>
+                        </td>
+                    </tr>
+                    <tr>
                         <td><strong><?php esc_html_e('Bot health', 'wp-ai-ebot'); ?></strong></td>
                         <td>
                             <?php
-                            if ($state === 'ready') {
-                                echo '<span style="color:#007017;font-weight:600;">' . esc_html__('Online — ready to answer shoppers.', 'wp-ai-ebot') . '</span>';
-                            } elseif ($state === 'setup') {
-                                echo '<span style="color:#787c82;">' . esc_html(Status::setup_message()) . '</span>';
+                            $indexed_n = (int) $indexed;
+                            if (! Config::has_server_endpoint() || ! Status::has_registered_credentials()) {
+                                echo '<span style="color:#787c82;font-weight:600;">' . esc_html__('Offline', 'wp-ai-ebot') . '</span>';
+                                echo '<br /><span class="description">' . esc_html(wp_strip_all_tags(Status::setup_message())) . '</span>';
                             } elseif ($state === 'error') {
-                                echo '<span style="color:#b32d2e;font-weight:600;">' . esc_html__('Not fully operational — last content sync failed.', 'wp-ai-ebot') . '</span>';
+                                echo '<span style="color:#b32d2e;font-weight:600;">' . esc_html__('Offline', 'wp-ai-ebot') . '</span>';
+                                echo '<br /><span class="description">' . esc_html__(
+                                    'The last content sync to the AI service did not succeed.',
+                                    'wp-ai-ebot'
+                                ) . '</span>';
                                 $err = Status::last_ingest_error_message();
                                 if ($err !== '') {
                                     echo '<br /><code style="font-size:12px;">' . esc_html($err) . '</code>';
                                 }
                             } else {
-                                echo '<span style="color:#996800;">' . esc_html__(
-                                    'Online — run a full reindex below so the bot has your full catalog.',
-                                    'wp-ai-ebot'
-                                ) . '</span>';
+                                echo '<span style="color:#007017;font-weight:600;">' . esc_html__('Online', 'wp-ai-ebot') . '</span>';
+                                echo ' — ';
+                                printf(
+                                    /* translators: %d: number of products counted in the AI knowledge index */
+                                    esc_html__('With %d Product Knowledge', 'wp-ai-ebot'),
+                                    $indexed_n
+                                );
                             }
                             ?>
                         </td>
@@ -763,7 +931,7 @@ final class Settings
                                     )
                                 ) . '</span>';
                             } else {
-                                echo esc_html__('No full reindex yet — counts appear after you run “Reindex”.', 'wp-ai-ebot');
+                                echo esc_html__('No product reindex recorded yet — run “Reindex listed products” on the Product index tab after you add items to the AI index list.', 'wp-ai-ebot');
                                 echo ' ';
                                 printf(
                                     /* translators: %d: published product count */
@@ -803,7 +971,7 @@ final class Settings
                                     sprintf(
                                         /* translators: %s: link */
                                         __('Edit under %s.', 'wp-ai-ebot'),
-                                        '<a href="' . esc_url(self::admin_tab_url('assistant')) . '">' . esc_html__('Assistant → Tone / instructions', 'wp-ai-ebot') . '</a>'
+                                        '<a href="' . esc_url(self::admin_tab_url('assistant')) . '">' . esc_html__('Assistant → Tone preset & instructions', 'wp-ai-ebot') . '</a>'
                                     ),
                                     [
                                         'a' => [
@@ -866,137 +1034,76 @@ final class Settings
                 </tbody>
             </table>
 
-            <div class="ai-ebot-reindex-card" style="margin-top:2em;max-width:56rem;">
-                <h2 class="title"><?php esc_html_e('Reindex', 'wp-ai-ebot'); ?></h2>
-                <p class="description"><?php esc_html_e('Send all published products, configured pages, site info, and custom chunks to the AI service again.', 'wp-ai-ebot'); ?></p>
+            <div id="ai-ebot-register" class="ai-ebot-register-card" style="max-width:56rem;margin-top:1.5rem;">
+                <h2 class="title"><?php esc_html_e('Registration & privacy', 'wp-ai-ebot'); ?></h2>
+                <p class="description"><?php esc_html_e('Service usage: AI Ebot records aggregate usage (for example chat and indexing counts), your site URL and display name, and software versions (WordPress, WooCommerce, this plugin) to operate the service. Chat message content is processed to generate replies and is not stored for analytics.', 'wp-ai-ebot'); ?></p>
+                <form id="ai-ebot-register-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('ai_ebot_save_connection'); ?>
+                    <input type="hidden" name="action" value="ai_ebot_save_connection" />
+                </form>
+                <?php if (Status::has_registered_credentials()) : ?>
+                    <p class="description"><?php esc_html_e('Your site is already registered. Use the button below again if you need to refresh registration (for example after restoring a backup).', 'wp-ai-ebot'); ?></p>
+                    <p class="submit">
+                        <button type="submit" class="button button-primary" form="ai-ebot-register-form"><?php esc_html_e('Connect to AI Ebot', 'wp-ai-ebot'); ?></button>
+                    </p>
+                <?php endif; ?>
+            </div>
 
-                <div id="ai-ebot-reindex-ui" class="ai-ebot-reindex-ui">
-                    <p class="submit" style="margin:0;padding:0;display:flex;flex-wrap:wrap;gap:0.5rem;align-items:center;">
-                        <button type="button" class="button button-secondary" id="ai-ebot-reindex-btn">
-                            <?php esc_html_e('Reindex all products & configured content', 'wp-ai-ebot'); ?>
-                        </button>
-                        <button type="button" class="button" id="ai-ebot-reindex-bg-btn">
-                            <?php esc_html_e('Reindex in background (WP-Cron)', 'wp-ai-ebot'); ?>
-                        </button>
-                        <button type="button" class="button-link" id="ai-ebot-reindex-bg-cancel" hidden>
-                            <?php esc_html_e('Cancel background job', 'wp-ai-ebot'); ?>
+            <div class="ai-ebot-reindex-card" style="margin-top:2em;max-width:56rem;">
+                <h2 class="title"><?php esc_html_e('Index maintenance', 'wp-ai-ebot'); ?></h2>
+                <p class="description"><?php esc_html_e('Refresh product embeddings from the Product index tab. Use the control below only to wipe every chunk for this site on the AI service (including pages and assistant text).', 'wp-ai-ebot'); ?></p>
+
+                <div class="ai-ebot-clear-index" style="margin-top:0;">
+                    <p class="description" style="margin-top:0;">
+                        <?php esc_html_e('Testing or migrating? Clear every stored chunk for this site on the AI service.', 'wp-ai-ebot'); ?>
+                    </p>
+                    <p class="submit" style="margin:0;">
+                        <button type="button" class="button" id="ai-ebot-clear-vector-index-btn">
+                            <?php esc_html_e('Clear all chunks on AI Ebot (this site only)', 'wp-ai-ebot'); ?>
                         </button>
                     </p>
-                    <p class="description" id="ai-ebot-bg-reindex-line" hidden></p>
-
-                    <div id="ai-ebot-reindex-progress" class="ai-ebot-reindex-progress" hidden>
-                        <div class="ai-ebot-reindex-progress__track" aria-hidden="true">
-                            <div class="ai-ebot-reindex-progress__fill"></div>
-                        </div>
-                        <p class="ai-ebot-reindex-progress__label" id="ai-ebot-reindex-progress-label"></p>
-                    </div>
-
-                    <div id="ai-ebot-reindex-success" class="ai-ebot-reindex-success" hidden>
-                        <span class="dashicons dashicons-yes-alt" aria-hidden="true"></span>
-                        <span id="ai-ebot-reindex-success-text"></span>
-                    </div>
-
-                    <div id="ai-ebot-reindex-error" class="ai-ebot-reindex-error" role="alert" hidden></div>
+                    <p class="description" id="ai-ebot-clear-vector-index-status" style="margin-bottom:0;" hidden aria-live="polite"></p>
                 </div>
 
                 <?php self::render_product_index_status_card((int) $indexed, (int) $catalog); ?>
-
-                <noscript>
-                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                        <?php wp_nonce_field('ai_ebot_reindex'); ?>
-                        <input type="hidden" name="action" value="ai_ebot_reindex" />
-                        <?php submit_button(__('Reindex (no JavaScript)', 'wp-ai-ebot'), 'secondary'); ?>
-                    </form>
-                </noscript>
             </div>
 
-            <hr style="margin:2em 0;" />
-            <h2 class="title"><?php esc_html_e('Frontend shortcode', 'wp-ai-ebot'); ?></h2>
-            <p><code>[ai_ebot_chat title="<?php echo esc_attr(__('Ask us', 'wp-ai-ebot')); ?>"]</code></p>
-            <?php endif; ?>
-
-            <?php if ($tab === 'connection') : ?>
-                <?php
-                $health = (new Server_Client())->fetch_service_health();
-                $cb_state = Status::chatbot_state();
-                ?>
-            <h2 class="title"><?php esc_html_e('Connection', 'wp-ai-ebot'); ?></h2>
-            <table class="widefat striped" style="max-width:56rem;margin-bottom:1.25rem;">
-                <thead>
-                    <tr>
-                        <th scope="col"><?php esc_html_e('Check', 'wp-ai-ebot'); ?></th>
-                        <th scope="col"><?php esc_html_e('Status', 'wp-ai-ebot'); ?></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><strong><?php esc_html_e('AI Ebot server', 'wp-ai-ebot'); ?></strong></td>
-                        <td>
-                            <?php
-                            if ($health['ok']) {
-                                echo '<span style="color:#007017;font-weight:600;">' . esc_html__('Reachable', 'wp-ai-ebot') . '</span>';
-                            } else {
-                                echo '<span style="color:#b32d2e;font-weight:600;">' . esc_html__('Unreachable', 'wp-ai-ebot') . '</span>';
-                                echo ' <span class="description">' . esc_html(
-                                    sprintf(
-                                        /* translators: %s: HTTP status code or "—" for network error */
-                                        __('(HTTP %s)', 'wp-ai-ebot'),
-                                        $health['code'] > 0 ? (string) (int) $health['code'] : '—'
-                                    )
-                                ) . '</span>';
-                            }
-                            ?>
-                            <p class="description" style="margin:0.35rem 0 0;">
-                                <code style="font-size:12px;"><?php echo esc_html(Config::server_base_url()); ?></code>
-                            </p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><strong><?php esc_html_e('Storefront chatbot', 'wp-ai-ebot'); ?></strong></td>
-                        <td>
-                            <?php
-                            if ($cb_state === 'ready') {
-                                echo '<span style="color:#007017;font-weight:600;">' . esc_html__('Online', 'wp-ai-ebot') . '</span>';
-                            } elseif ($cb_state === 'setup') {
-                                echo '<span style="color:#787c82;font-weight:600;">' . esc_html__('Offline', 'wp-ai-ebot') . '</span>';
-                                echo '<br /><span class="description">' . esc_html(Status::setup_message()) . '</span>';
-                            } elseif ($cb_state === 'error') {
-                                echo '<span style="color:#b32d2e;font-weight:600;">' . esc_html__('Offline', 'wp-ai-ebot') . '</span>';
-                                echo '<br /><span class="description">' . esc_html__('Last sync failed. Check Overview for details.', 'wp-ai-ebot') . '</span>';
-                            } else {
-                                echo '<span style="color:#996800;font-weight:600;">' . esc_html__('Not ready', 'wp-ai-ebot') . '</span>';
-                                echo '<br /><span class="description">' . esc_html__('Run a full reindex on Overview so the assistant has your catalog.', 'wp-ai-ebot') . '</span>';
-                            }
-                            ?>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-            <p class="description" style="max-width:56rem;">
-                <?php esc_html_e('Service usage: AI Ebot records aggregate usage (for example chat and indexing counts), your site URL and display name, and software versions (WordPress, WooCommerce, this plugin) to operate the service. Chat message content is processed to generate replies and is not stored for analytics.', 'wp-ai-ebot'); ?>
-            </p>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:1rem;">
-                <?php wp_nonce_field('ai_ebot_save_connection'); ?>
-                <input type="hidden" name="action" value="ai_ebot_save_connection" />
-                <?php if (Status::has_registered_credentials()) : ?>
-                    <p class="description" style="max-width:56rem;"><?php esc_html_e('Your site is already registered. Use the button below again if you need to refresh registration (for example after restoring a backup).', 'wp-ai-ebot'); ?></p>
-                <?php else : ?>
-                    <p style="max-width:56rem;"><?php esc_html_e('On activation, the plugin tries to link this site automatically: if your site URL already exists on the service and your site secret matches, your existing account is reused; otherwise a new tenant is created. Use the button below if that step did not run or failed.', 'wp-ai-ebot'); ?></p>
-                <?php endif; ?>
-                <?php submit_button(__('Connect to AI Ebot', 'wp-ai-ebot')); ?>
-            </form>
             <?php endif; ?>
 
             <?php if ($tab === 'assistant') : ?>
-            <form method="post" action="options.php" style="margin-top:0;">
-                <?php settings_fields(self::OPTION_GROUP); ?>
+            <form method="post" action="" id="ai-ebot-assistant-form" style="margin-top:0;">
                 <h2 class="title"><?php esc_html_e('Assistant behavior', 'wp-ai-ebot'); ?></h2>
+                <p class="description" style="max-width:56rem;">
+                    <?php esc_html_e('Saving sends your tone, instructions, and grounding preference to WordPress and updates the “assistant behavior” chunk in the AI search index so shoppers get consistent guidance.', 'wp-ai-ebot'); ?>
+                </p>
                 <table class="form-table">
                     <tr>
-                        <th><label for="ai_ebot_tone"><?php esc_html_e('Tone / instructions', 'wp-ai-ebot'); ?></label></th>
+                        <th scope="row"><?php esc_html_e('Tone preset', 'wp-ai-ebot'); ?></th>
                         <td>
-                            <textarea name="ai_ebot_tone" id="ai_ebot_tone" rows="5" class="large-text"><?php echo esc_textarea((string) get_option('ai_ebot_tone', '')); ?></textarea>
-                            <p class="description"><?php esc_html_e('Describe voice and policies (e.g. concise, friendly, shipping policy summary).', 'wp-ai-ebot'); ?></p>
+                            <fieldset>
+                                <?php
+                                $preset_val = sanitize_key((string) get_option(Tone::OPT_PRESET, 'custom'));
+                                if (! array_key_exists($preset_val, Tone::preset_labels())) {
+                                    $preset_val = 'custom';
+                                }
+                                foreach (Tone::preset_labels() as $slug => $label) {
+                                    ?>
+                                    <label style="display:block;margin:0.25rem 0;">
+                                        <input type="radio" name="<?php echo esc_attr(Tone::OPT_PRESET); ?>" value="<?php echo esc_attr($slug); ?>" <?php checked($preset_val, $slug); ?> />
+                                        <?php echo esc_html($label); ?>
+                                    </label>
+                                    <?php
+                                }
+                                ?>
+                            </fieldset>
+                            <p class="description"><?php esc_html_e('Choose a base style. “Custom” uses only the instructions below; other presets add their own guidance and can include your additional text.', 'wp-ai-ebot'); ?></p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="ai_ebot_tone"><?php esc_html_e('Additional instructions', 'wp-ai-ebot'); ?></label></th>
+                        <td>
+                            <textarea name="ai_ebot_tone" id="ai_ebot_tone" rows="6" class="large-text"><?php echo esc_textarea((string) get_option('ai_ebot_tone', '')); ?></textarea>
+                            <p class="description"><?php esc_html_e('Store policies, shipping rules, what to avoid, brand voice, or any extra rules. For non-custom presets, this text is appended after the preset.', 'wp-ai-ebot'); ?></p>
                         </td>
                     </tr>
                     <tr>
@@ -1009,7 +1116,19 @@ final class Settings
                         </td>
                     </tr>
                 </table>
-                <?php submit_button(__('Save behavior', 'wp-ai-ebot')); ?>
+                <p class="submit">
+                    <button type="button" class="button button-primary" id="ai-ebot-assistant-save-index">
+                        <?php esc_html_e('Save behavior and index', 'wp-ai-ebot'); ?>
+                    </button>
+                </p>
+                <div id="ai-ebot-assistant-index-status" class="ai-ebot-knowledge-index-status" hidden aria-live="polite">
+                    <p class="ai-ebot-knowledge-index-status__text" id="ai-ebot-assistant-index-status-text"></p>
+                    <div id="ai-ebot-assistant-index-progress" class="ai-ebot-knowledge-index-progress" hidden>
+                        <div class="ai-ebot-knowledge-index-progress__track" aria-hidden="true">
+                            <div class="ai-ebot-knowledge-index-progress__fill" style="width:40%;"></div>
+                        </div>
+                    </div>
+                </div>
             </form>
             <?php endif; ?>
 
@@ -1063,36 +1182,7 @@ final class Settings
             <?php endif; ?>
 
             <?php if ($tab === 'knowledge') : ?>
-            <form method="post" action="options.php" style="margin-top:0;">
-                <?php settings_fields(self::OPTION_GROUP); ?>
-                <h2 class="title"><?php esc_html_e('Sync pages', 'wp-ai-ebot'); ?></h2>
-                <p><?php esc_html_e('Comma-separated page IDs to include (About, FAQ, etc.).', 'wp-ai-ebot'); ?></p>
-                <input type="text" name="ai_ebot_sync_page_ids_csv" value="<?php echo esc_attr((string) get_option('ai_ebot_sync_page_ids_csv', '')); ?>" class="large-text" id="ai_ebot_page_ids" />
-                <p class="description"><?php esc_html_e('Numeric IDs only, separated by commas.', 'wp-ai-ebot'); ?></p>
-                <?php submit_button(__('Save page IDs', 'wp-ai-ebot')); ?>
-            </form>
-
-            <form method="post" action="options.php" style="margin-top:2em;">
-                <?php settings_fields(self::OPTION_GROUP); ?>
-                <h2 class="title"><?php esc_html_e('Custom knowledge', 'wp-ai-ebot'); ?></h2>
-                <div id="ai-ebot-chunks">
-                    <?php
-                    $rows = array_merge($custom, [['title' => '', 'body' => '']]);
-                    foreach ($rows as $i => $row) {
-                        $t = isset($row['title']) ? (string) $row['title'] : '';
-                        $b = isset($row['body']) ? (string) $row['body'] : '';
-                        ?>
-                        <div class="ai-ebot-chunk" style="margin-bottom:1em;padding:1em;border:1px solid #ccd0d4;">
-                            <p><label><?php esc_html_e('Title', 'wp-ai-ebot'); ?> <input type="text" name="ai_ebot_custom_chunks[<?php echo esc_attr((string) $i); ?>][title]" value="<?php echo esc_attr($t); ?>" class="regular-text" /></label></p>
-                            <p><label><?php esc_html_e('Content', 'wp-ai-ebot'); ?><br />
-                            <textarea name="ai_ebot_custom_chunks[<?php echo esc_attr((string) $i); ?>][body]" rows="4" class="large-text"><?php echo esc_textarea($b); ?></textarea></label></p>
-                        </div>
-                        <?php
-                    }
-                    ?>
-                </div>
-                <?php submit_button(__('Save custom chunks', 'wp-ai-ebot')); ?>
-            </form>
+                <?php Knowledge_Tab::render(); ?>
             <?php endif; ?>
 
             <?php if ($tab === 'sessions') : ?>
@@ -1107,8 +1197,9 @@ final class Settings
      * Dashboard-style metrics above the Status table (Overview tab).
      *
      * @param array<string, mixed>|null $billing From GET /v1/tenant/billing, or null if unavailable.
+     * @param int                         $published_wc_products Published WooCommerce product count (for context).
      */
-    private static function render_overview_metric_cards(?array $billing): void
+    private static function render_overview_metric_cards(?array $billing, int $published_wc_products = 0): void
     {
         $registered = Status::has_registered_credentials();
         $billing_ok = is_array($billing);
@@ -1117,7 +1208,7 @@ final class Settings
             $chats_value = '—';
             $chats_hint = __('Connect this site to see chat usage and limits.', 'wp-ai-ebot');
             $products_value = '—';
-            $products_hint = __('Connect to see how many products are indexed versus your plan limit.', 'wp-ai-ebot');
+            $products_hint = __('Connect to see how many products are embedded on the API versus your plan limit.', 'wp-ai-ebot');
             $tier_value = '—';
             $tier_hint = __('Your subscription tier appears after you connect.', 'wp-ai-ebot');
         } elseif (! $billing_ok) {
@@ -1144,12 +1235,19 @@ final class Settings
                 ? __('Unlimited', 'wp-ai-ebot')
                 : number_format_i18n($max);
             $products_value = sprintf(
-                /* translators: 1: distinct products in the AI index, 2: plan maximum (number or "Unlimited") */
+                /* translators: 1: distinct products embedded on the API for chat retrieval, 2: plan maximum (number or "Unlimited") */
                 __('%1$s / %2$s', 'wp-ai-ebot'),
                 number_format_i18n($idx),
                 $max_label
             );
-            $products_hint = __('Distinct products in AI search · plan limit', 'wp-ai-ebot');
+            $products_hint = __('Distinct products embedded for AI search/chat · your plan cap (not your WooCommerce catalog size).', 'wp-ai-ebot');
+            if (Status::is_woocommerce_active()) {
+                $products_hint .= ' ' . sprintf(
+                    /* translators: %s: formatted number of published products in WooCommerce */
+                    __('WooCommerce published: %s.', 'wp-ai-ebot'),
+                    number_format_i18n(max(0, $published_wc_products))
+                );
+            }
 
             $tier_value = self::billing_tier_label($billing);
             $tier_hint = '';
@@ -1162,7 +1260,7 @@ final class Settings
                 <p class="ai-ebot-metric-card__hint"><?php echo esc_html($chats_hint); ?></p>
             </div>
             <div class="ai-ebot-metric-card">
-                <div class="ai-ebot-metric-card__label"><?php esc_html_e('Products indexed', 'wp-ai-ebot'); ?></div>
+                <div class="ai-ebot-metric-card__label"><?php esc_html_e('Products in AI index', 'wp-ai-ebot'); ?></div>
                 <div class="ai-ebot-metric-card__value"><?php echo esc_html($products_value); ?></div>
                 <p class="ai-ebot-metric-card__hint"><?php echo esc_html($products_hint); ?></p>
             </div>
@@ -1243,7 +1341,7 @@ final class Settings
                 </li>
             </ul>
             <p class="description ai-ebot-index-status__hint" id="ai-ebot-index-hint" <?php echo $show_hint ? '' : 'hidden'; ?>>
-                <?php esc_html_e('Counts can differ if you added products after the last reindex. Run reindex again to refresh.', 'wp-ai-ebot'); ?>
+                <?php esc_html_e('Counts can differ after catalog changes. Use “Reindex listed products” on the Product index tab to refresh.', 'wp-ai-ebot'); ?>
             </p>
         </div>
         <?php

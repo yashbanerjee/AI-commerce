@@ -93,6 +93,18 @@
   color: #646970;
 }
 
+/* Destructive action button (Product index tab) */
+.ai-ebot-button-danger {
+  color: #b32d2e !important;
+  border-color: #b32d2e !important;
+}
+.ai-ebot-button-danger:hover,
+.ai-ebot-button-danger:focus {
+  color: #fff !important;
+  background: #b32d2e !important;
+  border-color: #b32d2e !important;
+}
+
 /* [hidden] must win over display:flex — otherwise the success box stays visible on load */
 .ai-ebot-reindex-success[hidden],
 .ai-ebot-reindex-progress[hidden],
@@ -193,5 +205,99 @@
 }
 
 .ai-ebot-index-status__hint[hidden] {
+  display: none !important;
+}
+
+/* Knowledge tab: Save and index pages */
+.ai-ebot-knowledge-index-status {
+  max-width: 40rem;
+  margin-top: 1rem;
+  padding: 0.25rem 0;
+}
+
+.ai-ebot-knowledge-index-status__text {
+  margin: 0 0 0.5rem;
+  font-size: 13px;
+}
+
+.ai-ebot-knowledge-index-progress {
+  margin-top: 0.35rem;
+  max-width: 28rem;
+}
+
+.ai-ebot-knowledge-index-progress__track {
+  height: 8px;
+  border-radius: 4px;
+  background: #dcdcde;
+  overflow: hidden;
+}
+
+.ai-ebot-knowledge-index-progress__fill {
+  height: 100%;
+  width: 35%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #2271b1, #72aee6, #2271b1);
+  background-size: 200% 100%;
+  animation: ai-ebot-reindex-shimmer 1.1s ease-in-out infinite;
+}
+
+.ai-ebot-knowledge-index-progress.is-determinate .ai-ebot-knowledge-index-progress__fill {
+  animation: none;
+  width: 0%;
+  transition: width 0.25s ease-out;
+}
+
+/* Product index tab: two-column catalog + curated list */
+.ai-ebot-catalog-index__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 1rem 1.25rem;
+  align-items: start;
+  max-width: 72rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .ai-ebot-catalog-index__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-ebot-catalog-index__col--actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    max-width: none;
+  }
+}
+
+.ai-ebot-catalog-index__col--actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 2.25rem;
+  min-width: 11rem;
+}
+
+.ai-ebot-catalog-index__table-wrap {
+  overflow-x: auto;
+  max-height: min(70vh, 36rem);
+  overflow-y: auto;
+  border: 1px solid #c3c4c7;
+  border-radius: 2px;
+}
+
+.ai-ebot-catalog-index__table-wrap table {
+  margin: 0;
+}
+
+.ai-ebot-ci-row--inactive {
+  opacity: 0.65;
+}
+
+#ai-ebot-ci-action-status[hidden] {
+  display: none !important;
+}
+
+#ai-ebot-ci-progress[hidden] {
   display: none !important;
 }

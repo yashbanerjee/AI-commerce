@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace AI_Ebot;
 
+use AI_Ebot\Admin\Catalog_Index_Tab;
+
 /**
- * Schedules reindex in small steps via WP-Cron (no long browser or PHP request).
+ * Schedules **curated list** product reindex in small steps via WP-Cron (no long browser or PHP request).
  */
 final class Background_Reindex
 {
@@ -33,7 +35,7 @@ final class Background_Reindex
         $sync = Sync::instance();
         if (! $sync->can_sync()) {
             wp_send_json_error(
-                ['message' => __('Connect this site under Connection before reindexing.', 'wp-ai-ebot')],
+                ['message' => __('Connect this site on the Overview tab before reindexing.', 'wp-ai-ebot')],
                 400
             );
         }
@@ -46,16 +48,28 @@ final class Background_Reindex
             );
         }
 
-        $scope = $sync->get_reindex_product_scope();
+        $curated = Catalog_Index_Tab::get_curated_product_ids();
+        if ($curated === []) {
+            wp_send_json_error(
+                ['message' => __('Add products to the AI index list before starting a background reindex.', 'wp-ai-ebot')],
+                400
+            );
+        }
+
+        $scope = $sync->get_curated_reindex_scope();
+        $csv = implode(',', array_map(static fn (int $id): string => (string) $id, $curated));
+
         update_option(
             self::OPTION,
             [
                 'status' => 'running',
-                'phase' => 'products',
-                'offset' => 0,
-                'total' => $scope['total'],
+                'phase' => 'curated',
+                'curated_csv' => $csv,
+                'orphan_batch' => 0,
+                'product_offset' => 0,
+                'total' => count($curated),
                 'published' => $scope['published'],
-                'cap_applied' => $scope['capped'],
+                'cap_applied' => false,
                 'message' => __('Starting…', 'wp-ai-ebot'),
                 'updated_at' => time(),
             ],
@@ -122,67 +136,49 @@ final class Background_Reindex
                 return;
             }
 
-            $phase = (string) ($state['phase'] ?? 'products');
-            if ($phase === 'products') {
-                $offset = (int) ($state['offset'] ?? 0);
-                $out = $sync->step_reindex_products_page($offset);
-                if (! $out['ok']) {
-                    self::fail_state(
-                        __('The AI service did not accept a reindex batch. Check Status for details.', 'wp-ai-ebot')
-                    );
-
-                    return;
-                }
-
-                $state['offset'] = (int) $out['indexed_so_far'];
-                $state['total'] = (int) $out['total_products'];
-                $state['published'] = (int) ($out['published_products'] ?? $out['total_products']);
-                $state['cap_applied'] = ! empty($out['index_cap_applied']);
-                $state['message'] = sprintf(
-                    /* translators: 1: indexed count, 2: total in scope */
-                    __('%1$d of %2$d products sent…', 'wp-ai-ebot'),
-                    (int) $out['indexed_so_far'],
-                    (int) $out['total_products']
-                );
-                $state['updated_at'] = time();
-
-                if (! empty($out['requires_extras'])) {
-                    $state['phase'] = 'extras';
-                }
-
-                update_option(self::OPTION, $state, false);
-
-                if (($state['phase'] ?? '') === 'extras') {
-                    wp_schedule_single_event(time() + 5, self::CRON_HOOK);
-                } else {
-                    wp_schedule_single_event(time() + 45, self::CRON_HOOK);
-                }
-                self::spawn_wp_cron();
-
-                return;
-            }
-
-            // extras
-            $out = $sync->step_reindex_extras_and_finalize();
+            $out = $sync->background_curated_tick($state);
             if (! $out['ok']) {
-                self::fail_state(
-                    __('Extras / finalize step failed. Check Status for the last sync error.', 'wp-ai-ebot')
+                $fail = (string) ($out['fail_message'] ?? '');
+                if ($fail === '') {
+                    $fail = __('The AI service did not accept a reindex batch. Check Status for details.', 'wp-ai-ebot');
+                }
+                self::fail_state($fail);
+
+                return;
+            }
+
+            if (! empty($out['finished'])) {
+                Status::invalidate_billing_cache((string) get_option('ai_ebot_tenant_id', ''));
+                $listed = (int) ($state['total'] ?? 0);
+                delete_option(self::OPTION);
+                wp_clear_scheduled_hook(self::CRON_HOOK);
+                set_transient(
+                    'ai_ebot_bg_reindex_last_ok',
+                    [
+                        'finished_at' => time(),
+                        'product_count' => $listed,
+                    ],
+                    HOUR_IN_SECONDS
                 );
 
                 return;
             }
 
-            Status::invalidate_billing_cache((string) get_option('ai_ebot_tenant_id', ''));
-            delete_option(self::OPTION);
-            wp_clear_scheduled_hook(self::CRON_HOOK);
-            set_transient(
-                'ai_ebot_bg_reindex_last_ok',
-                [
-                    'finished_at' => time(),
-                    'product_count' => (int) $out['product_count'],
-                ],
-                HOUR_IN_SECONDS
-            );
+            $new_state = $out['state'] ?? $state;
+            if (! is_array($new_state)) {
+                self::fail_state(__('Invalid background reindex state.', 'wp-ai-ebot'));
+
+                return;
+            }
+
+            update_option(self::OPTION, $new_state, false);
+
+            $delay = 20;
+            if (($new_state['phase'] ?? '') === 'curated' && (int) ($new_state['orphan_batch'] ?? 0) > 0) {
+                $delay = 12;
+            }
+            wp_schedule_single_event(time() + $delay, self::CRON_HOOK);
+            self::spawn_wp_cron();
         } finally {
             delete_transient(self::LOCK_TRANSIENT);
         }

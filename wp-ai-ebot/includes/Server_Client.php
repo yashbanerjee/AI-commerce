@@ -121,9 +121,15 @@ final class Server_Client
      *
      * @return array{ok: bool, code: int, body: mixed, raw: string}
      */
-    public function get(string $path, int $timeout = 15, bool $with_auth = true): array
+    /**
+     * @param array<string, string|int|float|bool> $query_params
+     */
+    public function get(string $path, int $timeout = 15, bool $with_auth = true, array $query_params = []): array
     {
         $url = $this->base_url . $path;
+        if ($query_params !== []) {
+            $url .= (strpos($path, '?') !== false ? '&' : '?') . http_build_query($query_params);
+        }
         $headers = [
             'Accept' => 'application/json',
         ];

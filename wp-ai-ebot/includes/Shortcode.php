@@ -74,6 +74,141 @@ final class Shortcode
         );
     }
 
+    /**
+     * Fallback chips when the store has no product categories yet.
+     *
+     * @return list<string>
+     */
+    private static function default_starter_suggestions(): array
+    {
+        return [
+            __('Shipping & delivery', 'wp-ai-ebot'),
+            __('Returns & refunds', 'wp-ai-ebot'),
+            __('Help me pick a product', 'wp-ai-ebot'),
+        ];
+    }
+
+    /**
+     * Starter suggestion chips: top product categories by catalog usage (non-empty), then defaults.
+     *
+     * @return list<string>
+     */
+    private static function starter_suggestions_for_chat(): array
+    {
+        if (! taxonomy_exists('product_cat')) {
+            return apply_filters('ai_ebot_starter_suggestions', self::default_starter_suggestions());
+        }
+
+        $exclude = [];
+        $default_cat = (int) get_option('default_product_cat', 0);
+        if ($default_cat > 0) {
+            $exclude[] = $default_cat;
+        }
+
+        $base = [
+            'taxonomy' => 'product_cat',
+            'hide_empty' => true,
+            'number' => 24,
+            'orderby' => 'count',
+            'order' => 'DESC',
+        ];
+        if ($exclude !== []) {
+            $base['exclude'] = $exclude;
+        }
+
+        // Prefer top-level departments (what the shop "offers"); fall back to any category with products.
+        $terms = get_terms(array_merge($base, ['parent' => 0]));
+        if (is_wp_error($terms) || ! is_array($terms) || $terms === []) {
+            $terms = get_terms($base);
+        }
+
+        $out = [];
+        if (! is_wp_error($terms) && is_array($terms)) {
+            foreach ($terms as $term) {
+                if (! $term instanceof \WP_Term) {
+                    continue;
+                }
+                if ($term->slug === 'uncategorized') {
+                    continue;
+                }
+                $name = trim(wp_strip_all_tags($term->name));
+                if ($name === '') {
+                    continue;
+                }
+                $out[] = $name;
+                if (count($out) >= 6) {
+                    break;
+                }
+            }
+        }
+
+        if ($out === []) {
+            $out = self::default_starter_suggestions();
+        }
+
+        /** @var list<string> $filtered */
+        $filtered = apply_filters('ai_ebot_starter_suggestions', $out);
+
+        return is_array($filtered) ? $filtered : $out;
+    }
+
+    /**
+     * Category chips for the first question in chat.
+     * Prefer top-level departments; if the store has only one top-level category, fall back to all non-empty categories.
+     *
+     * @return list<string>
+     */
+    private static function category_chips_for_chat(): array
+    {
+        if (! taxonomy_exists('product_cat')) {
+            return [];
+        }
+
+        $exclude = [];
+        $default_cat = (int) get_option('default_product_cat', 0);
+        if ($default_cat > 0) {
+            $exclude[] = $default_cat;
+        }
+
+        $base = [
+            'taxonomy' => 'product_cat',
+            'hide_empty' => true,
+            'orderby' => 'name',
+            'order' => 'ASC',
+            // Keep UI usable for stores with many departments.
+            'number' => 48,
+        ];
+        if ($exclude !== []) {
+            $base['exclude'] = $exclude;
+        }
+
+        $terms = get_terms(array_merge($base, ['parent' => 0]));
+        if (! is_wp_error($terms) && is_array($terms) && count($terms) <= 1) {
+            // Single “Shop” parent: show subcategories too.
+            $terms = get_terms($base);
+        }
+        if (is_wp_error($terms) || ! is_array($terms) || $terms === []) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($terms as $term) {
+            if (! $term instanceof \WP_Term) {
+                continue;
+            }
+            if ($term->slug === 'uncategorized') {
+                continue;
+            }
+            $name = trim(wp_strip_all_tags($term->name));
+            if ($name === '') {
+                continue;
+            }
+            $out[] = $name;
+        }
+
+        return $out;
+    }
+
     public static function instance(): self
     {
         if (self::$instance === null) {
@@ -121,13 +256,15 @@ final class Shortcode
             'restUrl' => esc_url_raw(rest_url('ai-ebot/v1/chat')),
             /** Fetched at runtime via bootstrap (correct per visitor; avoids stale nonce from page cache). */
             'bootstrapUrl' => esc_url_raw(rest_url('ai-ebot/v1/bootstrap')),
+            /** Satisfies {@see rest_cookie_check_errors} on bootstrap GET when the page was rendered for this user. */
+            'bootstrapProbeNonce' => wp_create_nonce('wp_rest'),
             'nonce' => '',
             'suggestionsLabel' => __('Suggested replies', 'wp-ai-ebot'),
-            'starterSuggestions' => [
-                __('Shipping & delivery', 'wp-ai-ebot'),
-                __('Returns & refunds', 'wp-ai-ebot'),
-                __('Help me pick a product', 'wp-ai-ebot'),
-            ],
+            /** Label above the product card row in chat (same layout for every product). */
+            'productCardsHeading' => __('Products', 'wp-ai-ebot'),
+            'initPrompt' => __('What are you looking for?', 'wp-ai-ebot'),
+            'categoryChips' => self::category_chips_for_chat(),
+            'starterSuggestions' => self::starter_suggestions_for_chat(),
             'thinkingPhrases' => [
                 __('Thinking…', 'wp-ai-ebot'),
                 __('Browsing the catalog…', 'wp-ai-ebot'),
@@ -172,7 +309,7 @@ final class Shortcode
         wp_enqueue_style('ai-ebot-chat');
         wp_enqueue_script('ai-ebot-chat');
 
-        $title = esc_html($header);
+        $title = '<span class="ai-ebot-chat__header-title">' . esc_html($header) . '</span>';
 
         return sprintf(
             '<div class="ai-ebot-chat" style="%1$s" data-ai-ebot-chat><div class="ai-ebot-chat__header">%2$s</div><div class="ai-ebot-chat__log" data-log></div><form class="ai-ebot-chat__form" data-form><input type="text" class="ai-ebot-chat__input" data-input placeholder="%3$s" autocomplete="off" /><button type="submit" class="ai-ebot-chat__send">%4$s</button></form></div>',
