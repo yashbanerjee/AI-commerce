@@ -7,22 +7,38 @@ import {
   handleRegister,
   handleIngest,
   handleChat,
+  handleStorefrontChatSessionMessages,
+  handleTenantChatSessionsList,
+  handleTenantChatSessionMessages,
   handleHeartbeat,
   handleTenantBilling,
+  handleTenantIndexedProducts,
+  handleTenantIndexedPages,
   handleAdminMetrics,
   handleAdminStatus,
   handleAdminConfig,
   handleAdminSetOpenAiKey,
   handleAdminDeleteOpenAiKey,
   handleAdminTenants,
+  handleAdminTenantDetail,
+  handleAdminTenantChunks,
+  handleAdminTenantChats,
+  handleAdminTenantChatMessages,
   handleAdminTenantChatQuotaPatch,
   handleAdminBillingPlans,
   handleAdminBillingPlanUpsert,
   handleAdminTenantBillingPatch,
 } from './routes.js';
 import { renderLandingPageHtml } from './landingHtml.js';
+import { env } from './config.js';
+import { httpRequestLogger } from './httpLog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const httpLogEnabled = (() => {
+  const v = env('HTTP_LOG', '1').trim().toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'no';
+})();
 
 /** `tsx src/server.ts` runs from `src/`; production uses `dist/` — admin assets live at repo `admin/public`. */
 function resolveAdminPublic(): string {
@@ -35,6 +51,7 @@ function resolveAdminPublic(): string {
 
 export function createApp(): express.Express {
   const app = express();
+  app.use(httpRequestLogger(httpLogEnabled));
   app.post('/v1/billing/webhook', express.raw({ type: 'application/json' }), (req, res) => {
     void handleStripeWebhook(req, res);
   });
@@ -57,11 +74,26 @@ export function createApp(): express.Express {
   app.post('/v1/chat', (req, res) => {
     void handleChat(req, res);
   });
+  app.get('/v1/chat/session/:publicId/messages', (req, res) => {
+    void handleStorefrontChatSessionMessages(req, res);
+  });
+  app.get('/v1/tenant/chat-sessions', (req, res) => {
+    void handleTenantChatSessionsList(req, res);
+  });
+  app.get('/v1/tenant/chat-sessions/:publicId/messages', (req, res) => {
+    void handleTenantChatSessionMessages(req, res);
+  });
   app.post('/v1/heartbeat', (req, res) => {
     void handleHeartbeat(req, res);
   });
   app.get('/v1/tenant/billing', (req, res) => {
     void handleTenantBilling(req, res);
+  });
+  app.get('/v1/tenant/indexed-products', (req, res) => {
+    void handleTenantIndexedProducts(req, res);
+  });
+  app.get('/v1/tenant/indexed-pages', (req, res) => {
+    void handleTenantIndexedPages(req, res);
   });
   app.post('/v1/billing/create-checkout-session', (req, res) => {
     void handleCreateCheckoutSession(req, res);
@@ -81,6 +113,18 @@ export function createApp(): express.Express {
   });
   app.delete('/v1/admin/settings/openai-key', (req, res) => {
     void handleAdminDeleteOpenAiKey(req, res);
+  });
+  app.get('/v1/admin/tenants/:tenantId/chats/:sessionId/messages', (req, res) => {
+    void handleAdminTenantChatMessages(req, res);
+  });
+  app.get('/v1/admin/tenants/:tenantId/chunks', (req, res) => {
+    void handleAdminTenantChunks(req, res);
+  });
+  app.get('/v1/admin/tenants/:tenantId/chats', (req, res) => {
+    void handleAdminTenantChats(req, res);
+  });
+  app.get('/v1/admin/tenants/:tenantId', (req, res) => {
+    void handleAdminTenantDetail(req, res);
   });
   app.get('/v1/admin/tenants', (req, res) => {
     void handleAdminTenants(req, res);

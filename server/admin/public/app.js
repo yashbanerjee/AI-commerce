@@ -332,11 +332,12 @@ async function loadTenants() {
           <td>${esc(formatTs(t.last_seen_at))}</td>
           <td>${sc}</td>
           <td class="mono">${esc(t.id)}</td>
+          <td><button type="button" class="btn btn--ghost btn--small" data-action="tenant-open" data-tenant-id="${esc(t.id)}">Open</button></td>
         </tr>`;
       })
       .join('');
     if (!rows.length) {
-      tbody.innerHTML = '<tr><td colspan="18">No tenants match.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="19">No tenants match.</td></tr>';
     }
 
     const total = data.total ?? 0;
@@ -452,7 +453,251 @@ async function loadSystem() {
   }
 }
 
+let tenantDetailId = null;
+let tenantChatsOffset = 0;
+const tenantChatsPageSize = 25;
+let tenantChunksOffset = 0;
+const tenantChunksPageSize = 25;
+/** @type {Map<string, object>} */
+let lastTenantChunksById = new Map();
+
+function tenantDetailViewOpen() {
+  const el = document.getElementById('tenant-detail-view');
+  return el && !el.classList.contains('hidden');
+}
+
+function leaveTenantDetailShell() {
+  document.getElementById('tenant-detail-view').classList.add('hidden');
+  document.getElementById('tenant-detail-view').setAttribute('aria-hidden', 'true');
+  document.getElementById('main-toolbar').classList.remove('hidden');
+  document.getElementById('tenant-thread-panel').classList.add('hidden');
+  const chunkPanel = document.getElementById('tenant-chunk-detail');
+  if (chunkPanel) chunkPanel.classList.add('hidden');
+  lastTenantChunksById = new Map();
+  tenantDetailId = null;
+}
+
+function closeTenantDetailView() {
+  leaveTenantDetailShell();
+  setActiveTab('tenants');
+  void loadTenants();
+}
+
+async function openTenantDetailView(tenantId) {
+  tenantDetailId = tenantId;
+  tenantChatsOffset = 0;
+  tenantChunksOffset = 0;
+  lastTenantChunksById = new Map();
+  document.getElementById('tenant-detail-view').classList.remove('hidden');
+  document.getElementById('tenant-detail-view').setAttribute('aria-hidden', 'false');
+  document.getElementById('main-toolbar').classList.add('hidden');
+  document.querySelectorAll('.main > section.tab').forEach((el) => el.classList.add('hidden'));
+  await loadTenantDetailPage();
+}
+
+async function loadTenantDetailPage() {
+  const errEl = document.getElementById('tenant-detail-error');
+  errEl.classList.add('hidden');
+  if (!tenantDetailId) return;
+  try {
+    const d = await apiGet(`/v1/admin/tenants/${encodeURIComponent(tenantDetailId)}`);
+    const t = d.tenant;
+    document.getElementById('tenant-detail-title').textContent = t.site_name || t.site_url || 'Tenant';
+    const idxCap = formatMaxIndexedCap(t.max_indexed_products);
+    const summary = document.getElementById('tenant-detail-summary');
+    summary.innerHTML = `<div class="tenant-detail-grid">
+      <div class="config-item"><div class="config-item__k">Site URL</div><div class="config-item__v"><a href="${esc(t.site_url)}" target="_blank" rel="noopener">${esc(t.site_url)}</a></div></div>
+      <div class="config-item"><div class="config-item__k">Site name</div><div class="config-item__v">${esc(t.site_name || '—')}</div></div>
+      <div class="config-item"><div class="config-item__k">Tenant ID</div><div class="config-item__v mono">${esc(t.id)}</div></div>
+      <div class="config-item"><div class="config-item__k">Plan / subscription</div><div class="config-item__v mono">${esc(t.billing_plan_slug || '—')} / ${esc(t.subscription_status || '—')}</div></div>
+      <div class="config-item"><div class="config-item__k">Chats (UTC month) / quota</div><div class="config-item__v">${esc(String(t.chats_utc_month ?? 0))} / ${esc(String(t.monthly_chat_quota ?? '—'))}</div></div>
+      <div class="config-item"><div class="config-item__k">Indexed products</div><div class="config-item__v mono">${esc(String(t.indexed_product_count ?? 0))} / ${esc(idxCap)}</div></div>
+      <div class="config-item"><div class="config-item__k">Plugin / WP / WC</div><div class="config-item__v mono">${esc(t.plugin_version || '—')} / ${esc(t.wp_version || '—')} / ${esc(t.wc_version || '—')}</div></div>
+      <div class="config-item"><div class="config-item__k">Last seen</div><div class="config-item__v">${esc(formatTs(t.last_seen_at))}</div></div>
+      <div class="config-item"><div class="config-item__k">Created</div><div class="config-item__v">${esc(formatTs(t.created_at))}</div></div>
+      <div class="config-item"><div class="config-item__k">Chats / ingests (30d)</div><div class="config-item__v">${esc(String(t.chats_30d))} / ${esc(String(t.ingests_30d))}</div></div>
+      <div class="config-item"><div class="config-item__k">Embed / chat tokens (30d)</div><div class="config-item__v mono">${esc(String(t.embed_tokens_30d ?? 0))} / ${esc(String(t.chat_prompt_tokens_30d ?? 0))}+${esc(String(t.chat_completion_tokens_30d ?? 0))}</div></div>
+      <div class="config-item"><div class="config-item__k">≈ OpenAI USD (30d)</div><div class="config-item__v">${formatUsd(t.estimated_openai_usd_30d)}</div></div>
+      <div class="config-item"><div class="config-item__k">Transcript sessions (server)</div><div class="config-item__v">${esc(String(d.chat_sessions_total ?? 0))}</div></div>
+    </div>`;
+    await loadTenantChatsPage();
+    await loadTenantChunksPage();
+  } catch (e) {
+    if (e.status === 401) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      showLogin();
+      return;
+    }
+    errEl.textContent = e.message || 'Failed to load tenant';
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function loadTenantChatsPage() {
+  if (!tenantDetailId) return;
+  const errEl = document.getElementById('tenant-detail-error');
+  errEl.classList.add('hidden');
+  const tbody = document.getElementById('tenant-chats-tbody');
+  try {
+    const d = await apiGet(
+      `/v1/admin/tenants/${encodeURIComponent(tenantDetailId)}/chats?limit=${tenantChatsPageSize}&offset=${tenantChatsOffset}`
+    );
+    const rows = d.sessions || [];
+    const total = d.total ?? 0;
+    tbody.innerHTML = rows
+      .map((s) => {
+        return `<tr>
+          <td class="mono">${esc(s.public_id)}</td>
+          <td class="num">${esc(String(s.message_count))}</td>
+          <td>${esc(formatTs(s.updated_at))}</td>
+          <td><button type="button" class="btn btn--ghost btn--small" data-action="chat-view" data-session-id="${esc(s.id)}">View</button></td>
+        </tr>`;
+      })
+      .join('');
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="4">No transcript sessions yet.</td></tr>';
+    }
+    const start = total === 0 ? 0 : tenantChatsOffset + 1;
+    const end = Math.min(tenantChatsOffset + rows.length, total);
+    document.getElementById('tenant-chats-pager').textContent =
+      total === 0 ? '0 sessions' : `${start}–${end} of ${total}`;
+    document.getElementById('tenant-chats-prev').disabled = tenantChatsOffset <= 0;
+    document.getElementById('tenant-chats-next').disabled = tenantChatsOffset + tenantChatsPageSize >= total;
+  } catch (e) {
+    if (e.status === 401) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      showLogin();
+      return;
+    }
+    tbody.innerHTML = '<tr><td colspan="4">Failed to load sessions.</td></tr>';
+    errEl.textContent = e.message || 'Failed to load chats';
+    errEl.classList.remove('hidden');
+  }
+}
+
+function tenantChunksQueryParams() {
+  const stEl = document.getElementById('tenant-chunks-source');
+  const qEl = document.getElementById('tenant-chunks-q');
+  const source_type = stEl && stEl.value != null ? String(stEl.value).trim() : '';
+  const q = qEl && qEl.value != null ? String(qEl.value).trim() : '';
+  return { source_type, q };
+}
+
+async function loadTenantChunksPage() {
+  if (!tenantDetailId) return;
+  const errEl = document.getElementById('tenant-detail-error');
+  errEl.classList.add('hidden');
+  const tbody = document.getElementById('tenant-chunks-tbody');
+  if (!tbody) return;
+  const { source_type, q } = tenantChunksQueryParams();
+  try {
+    const qs = new URLSearchParams({
+      limit: String(tenantChunksPageSize),
+      offset: String(tenantChunksOffset),
+    });
+    if (source_type) qs.set('source_type', source_type);
+    if (q) qs.set('q', q);
+    const d = await apiGet(
+      `/v1/admin/tenants/${encodeURIComponent(tenantDetailId)}/chunks?${qs.toString()}`
+    );
+    const rows = d.chunks || [];
+    const total = d.total ?? 0;
+    lastTenantChunksById = new Map(rows.map((c) => [c.id, c]));
+    tbody.innerHTML = rows
+      .map((c) => {
+        const emb = c.has_embedding ? 'yes' : '—';
+        const titleShort =
+          typeof c.title === 'string' && c.title.length > 56 ? `${esc(c.title.slice(0, 54))}…` : esc(c.title || '');
+        return `<tr>
+          <td><span class="mono">${esc(c.source_type || '')}</span></td>
+          <td class="mono">${esc(c.external_id || '')}</td>
+          <td class="num">${esc(String(c.chunk_index ?? 0))}</td>
+          <td title="${esc(typeof c.title === 'string' ? c.title : '')}">${titleShort || '—'}</td>
+          <td class="num">${esc(emb)}</td>
+          <td>${esc(formatTs(c.updated_at))}</td>
+          <td><button type="button" class="btn btn--ghost btn--small" data-action="chunk-view" data-chunk-id="${esc(c.id)}">View</button></td>
+        </tr>`;
+      })
+      .join('');
+    if (!rows.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="7">No chunks match these filters (or the index is empty).</td></tr>';
+    }
+    const start = total === 0 ? 0 : tenantChunksOffset + 1;
+    const end = Math.min(tenantChunksOffset + rows.length, total);
+    const pager = document.getElementById('tenant-chunks-pager');
+    if (pager) {
+      pager.textContent = total === 0 ? '0 chunks' : `${start}–${end} of ${total}`;
+    }
+    const prev = document.getElementById('tenant-chunks-prev');
+    const next = document.getElementById('tenant-chunks-next');
+    if (prev) prev.disabled = tenantChunksOffset <= 0;
+    if (next) next.disabled = tenantChunksOffset + tenantChunksPageSize >= total;
+  } catch (e) {
+    if (e.status === 401) {
+      sessionStorage.removeItem(STORAGE_KEY);
+      showLogin();
+      return;
+    }
+    tbody.innerHTML = '<tr><td colspan="7">Failed to load chunks.</td></tr>';
+    errEl.textContent = e.message || 'Failed to load chunks';
+    errEl.classList.remove('hidden');
+  }
+}
+
+function showTenantChunkDetail(row) {
+  if (!row) return;
+  const panel = document.getElementById('tenant-chunk-detail');
+  const meta = document.getElementById('tenant-chunk-detail-meta');
+  const body = document.getElementById('tenant-chunk-detail-content');
+  const metaJson = document.getElementById('tenant-chunk-detail-metadata');
+  if (!panel || !meta || !body || !metaJson) return;
+  const trunc = row.content_truncated ? ' · content truncated in list API' : '';
+  const u = typeof row.url === 'string' ? row.url : '';
+  meta.textContent = `${row.id} · ${row.source_type} · ${row.external_id} · chunk ${row.chunk_index}${trunc}${
+    u ? ` · ${u}` : ''
+  }`;
+  body.textContent = typeof row.content === 'string' ? row.content : '';
+  try {
+    metaJson.textContent = JSON.stringify(row.metadata && typeof row.metadata === 'object' ? row.metadata : {}, null, 2);
+  } catch {
+    metaJson.textContent = '{}';
+  }
+  panel.classList.remove('hidden');
+  body.scrollTop = 0;
+  metaJson.scrollTop = 0;
+}
+
+async function loadTenantThread(sessionUuid) {
+  const errEl = document.getElementById('tenant-detail-error');
+  errEl.classList.add('hidden');
+  const box = document.getElementById('tenant-thread-messages');
+  box.innerHTML = '';
+  try {
+    const d = await apiGet(
+      `/v1/admin/tenants/${encodeURIComponent(tenantDetailId)}/chats/${encodeURIComponent(sessionUuid)}/messages`
+    );
+    const msgs = d.messages || [];
+    box.innerHTML = msgs
+      .map((m) => {
+        const role = m.role === 'assistant' ? 'assistant' : 'user';
+        const content = typeof m.content === 'string' ? m.content : '';
+        return `<div class="transcript-msg transcript-msg--${role}"><div class="transcript-msg__meta">${esc(role)} · ${esc(formatTs(m.created_at))}</div><pre class="transcript-msg__body">${esc(content)}</pre></div>`;
+      })
+      .join('');
+    document.getElementById('tenant-thread-panel').classList.remove('hidden');
+    box.scrollTop = 0;
+  } catch (e) {
+    errEl.textContent = e.message || 'Failed to load messages';
+    errEl.classList.remove('hidden');
+  }
+}
+
 async function refreshCurrentTab() {
+  if (tenantDetailViewOpen()) {
+    await loadTenantDetailPage();
+    return;
+  }
   const active = document.querySelector('.nav__item--active');
   const tab = active?.dataset.tab || 'dashboard';
   if (tab === 'dashboard') await loadDashboard();
@@ -485,6 +730,9 @@ document.getElementById('btn-logout').addEventListener('click', () => {
 document.querySelectorAll('.nav__item').forEach((btn) => {
   btn.addEventListener('click', () => {
     const name = btn.dataset.tab;
+    if (tenantDetailViewOpen()) {
+      leaveTenantDetailShell();
+    }
     setActiveTab(name);
     if (name === 'dashboard') loadDashboard();
     if (name === 'tenants') {
@@ -522,7 +770,71 @@ document.getElementById('pager-next').addEventListener('click', () => {
   loadTenants();
 });
 
+document.getElementById('tenant-detail-back').addEventListener('click', () => {
+  closeTenantDetailView();
+});
+
+document.getElementById('tenant-chats-prev').addEventListener('click', async () => {
+  tenantChatsOffset = Math.max(0, tenantChatsOffset - tenantChatsPageSize);
+  await loadTenantChatsPage();
+});
+
+document.getElementById('tenant-chats-next').addEventListener('click', async () => {
+  tenantChatsOffset += tenantChatsPageSize;
+  await loadTenantChatsPage();
+});
+
+document.getElementById('tenant-chunks-prev')?.addEventListener('click', async () => {
+  tenantChunksOffset = Math.max(0, tenantChunksOffset - tenantChunksPageSize);
+  await loadTenantChunksPage();
+});
+
+document.getElementById('tenant-chunks-next')?.addEventListener('click', async () => {
+  tenantChunksOffset += tenantChunksPageSize;
+  await loadTenantChunksPage();
+});
+
+document.getElementById('tenant-chunks-apply')?.addEventListener('click', async () => {
+  tenantChunksOffset = 0;
+  document.getElementById('tenant-chunk-detail')?.classList.add('hidden');
+  await loadTenantChunksPage();
+});
+
+document.getElementById('tenant-chunk-detail-close')?.addEventListener('click', () => {
+  document.getElementById('tenant-chunk-detail')?.classList.add('hidden');
+});
+
+document.getElementById('tenant-chunks-tbody')?.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-action="chunk-view"]');
+  if (!b || !tenantDetailId) return;
+  const id = b.getAttribute('data-chunk-id');
+  if (!id) return;
+  const row = lastTenantChunksById.get(id);
+  showTenantChunkDetail(row);
+});
+
+document.getElementById('tenant-chats-tbody').addEventListener('click', async (ev) => {
+  const b = ev.target.closest('[data-action="chat-view"]');
+  if (!b || !tenantDetailId) return;
+  const sid = b.getAttribute('data-session-id');
+  if (!sid) return;
+  await loadTenantThread(sid);
+});
+
+document.getElementById('tenant-thread-close').addEventListener('click', () => {
+  document.getElementById('tenant-thread-panel').classList.add('hidden');
+});
+
 document.getElementById('table-tenants-body').addEventListener('click', async (ev) => {
+  const openBtn = ev.target.closest('[data-action="tenant-open"]');
+  if (openBtn) {
+    const id = openBtn.getAttribute('data-tenant-id');
+    if (id) {
+      await openTenantDetailView(id);
+    }
+    return;
+  }
+
   const tierBtn = ev.target.closest('[data-action="tier-apply"]');
   if (tierBtn) {
     const cell = tierBtn.closest('[data-tenant-id]');

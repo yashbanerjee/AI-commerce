@@ -18,15 +18,35 @@ export const OPENAI_API_URL = env('OPENAI_API_URL', 'https://api.openai.com/v1')
 export const OPENAI_CHAT_MODEL = env('OPENAI_CHAT_MODEL', 'gpt-4o-mini');
 export const OPENAI_EMBEDDING_MODEL = env('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small');
 
-/** Default max completion tokens for chat (non-catalog-heavy turns). */
+/** Default max completion tokens for chat (non-catalog-heavy turns). Lower = faster replies. */
 export const CHAT_COMPLETION_MAX_TOKENS = Math.max(
   256,
-  parseInt(env('CHAT_COMPLETION_MAX_TOKENS', '2500'), 10) || 2500
+  parseInt(env('CHAT_COMPLETION_MAX_TOKENS', '900'), 10) || 900
 );
 /** When WooCommerce sends a catalog outline, allow longer answers for full listings. */
 export const CHAT_COMPLETION_MAX_TOKENS_CATALOG = Math.max(
   CHAT_COMPLETION_MAX_TOKENS,
-  parseInt(env('CHAT_COMPLETION_MAX_TOKENS_CATALOG', '4500'), 10) || 4500
+  parseInt(env('CHAT_COMPLETION_MAX_TOKENS_CATALOG', '2800'), 10) || 2800
+);
+/** Cap catalog outline size sent to the model (huge outlines = slow + expensive). */
+export const CHAT_CATALOG_CONTEXT_MAX_CHARS = Math.max(
+  10_000,
+  parseInt(env('CHAT_CATALOG_CONTEXT_MAX_CHARS', '120000'), 10) || 120_000
+);
+/** Vector hits merged into chat context (lower = faster embedding + smaller prompts). */
+export const CHAT_RETRIEVAL_CHUNK_LIMIT = Math.min(
+  24,
+  Math.max(4, parseInt(env('CHAT_RETRIEVAL_CHUNK_LIMIT', '10'), 10) || 10)
+);
+/** Truncation per retrieved chunk in the user prompt. */
+export const CHAT_CONTEXT_MAX_CHARS_PER_ITEM = Math.max(
+  400,
+  parseInt(env('CHAT_CONTEXT_MAX_CHARS_PER_ITEM', '2000'), 10) || 2000
+);
+/** Greetings / tiny talk without catalog context: skip retrieval; keep completion short. */
+export const CHAT_QUICK_REPLY_MAX_TOKENS = Math.max(
+  120,
+  parseInt(env('CHAT_QUICK_REPLY_MAX_TOKENS', '400'), 10) || 400
 );
 /** Cap parsed product_cards from the model (UI + enrichment). */
 export const CHAT_PRODUCT_CARDS_MAX = Math.min(
@@ -75,3 +95,19 @@ export const STRIPE_PRICE_GROWTH = env('STRIPE_PRICE_GROWTH', '');
 export const STRIPE_PRICE_PRO = env('STRIPE_PRICE_PRO', '');
 export const STRIPE_CHECKOUT_SUCCESS_URL = env('STRIPE_CHECKOUT_SUCCESS_URL', '');
 export const STRIPE_CHECKOUT_CANCEL_URL = env('STRIPE_CHECKOUT_CANCEL_URL', '');
+
+/**
+ * Log full chat prompt (messages) and raw model completion text to stdout.
+ * - Set AI_EBOT_LOG_LLM_IO=1 / 0 to force on or off.
+ * - If unset: on when NODE_ENV is not "production" (local dev), off in production.
+ */
+function parseEnvTriState(name: string): boolean | null {
+  const v = env(name, '').trim().toLowerCase();
+  if (v === '1' || v === 'true' || v === 'yes') return true;
+  if (v === '0' || v === 'false' || v === 'no') return false;
+  return null;
+}
+
+const logLlmExplicit = parseEnvTriState('AI_EBOT_LOG_LLM_IO');
+export const LOG_LLM_IO =
+  logLlmExplicit !== null ? logLlmExplicit : process.env.NODE_ENV !== 'production';

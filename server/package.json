@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc && rm -rf dist/admin/public && mkdir -p dist/admin && cp -R admin/public dist/admin/public",
     "start": "node dist/migrate.js && node dist/server.js",
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx src/migrate.ts && tsx watch src/server.ts",
     "migrate": "node dist/migrate.js",
     "cdk": "cd infra && npx cdk",
     "cdk:synth": "cd infra && npx cdk synth"

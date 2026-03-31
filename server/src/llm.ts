@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import {
   CHAT_COMPLETION_MAX_TOKENS,
+  LOG_LLM_IO,
   OPENAI_API_URL,
   OPENAI_CHAT_MODEL,
   CHAT_PRODUCT_CARDS_MAX,
@@ -50,6 +51,17 @@ export async function generateAnswerWithOpenAi(
   maxOutputTokens: number = CHAT_COMPLETION_MAX_TOKENS
 ): Promise<ChatWithUsage> {
   const client = new OpenAI({ apiKey, baseURL: OPENAI_API_URL });
+  if (LOG_LLM_IO) {
+    const sep = '\n' + '='.repeat(72) + '\n';
+    let promptDump = `${sep}[llm] PROMPT — ${messages.length} message(s) (sent to ${OPENAI_CHAT_MODEL})${sep}`;
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      promptDump += `--- #${i + 1} role=${m.role} (${m.content.length} chars) ---\n${m.content}\n\n`;
+    }
+    // eslint-disable-next-line no-console
+    console.log(promptDump.trimEnd());
+  }
+
   const res = await client.chat.completions.create({
     model: OPENAI_CHAT_MODEL,
     temperature: 0.25,
@@ -58,6 +70,13 @@ export async function generateAnswerWithOpenAi(
     ...(useJsonObjectMode() ? { response_format: { type: 'json_object' as const } } : {}),
   });
   const text = res.choices[0]?.message?.content ?? '';
+  if (LOG_LLM_IO) {
+    const sep = '\n' + '='.repeat(72) + '\n';
+    // eslint-disable-next-line no-console
+    console.log(
+      `${sep}[llm] RAW COMPLETION (${text.length} chars)${sep}${text}${sep}[llm] END RAW COMPLETION${sep}`
+    );
+  }
   const u = res.usage;
   const parsed = parseJsonResponse(text);
 
@@ -95,12 +114,34 @@ function suggestionItemToString(s: unknown): string {
   return '';
 }
 
+/**
+ * Suggestion chips must read as the shopper's next message, not the assistant asking them questions.
+ */
+function looksLikeAssistantPhrasedSuggestion(t: string): boolean {
+  const s = t.trim();
+  if (s.length < 4) return false;
+  return (
+    /^(can|may)\s+i\s+(help|assist|offer|get|show|find|recommend)\b/i.test(s) ||
+    /^would\s+you\s+like\b/i.test(s) ||
+    /^are\s+you\s+interested\b/i.test(s) ||
+    /^shall\s+i\b/i.test(s) ||
+    /^do\s+you\s+want\s+me\s+to\b/i.test(s) ||
+    /^is\s+there\s+anything\s+else\b/i.test(s) ||
+    /^need\s+help\s+with\s+anything\b/i.test(s) ||
+    /^can\s+i\s+help\s+you\s+with\b/i.test(s) ||
+    /^would\s+you\s+like\s+to\s+know\s+more\b/i.test(s) ||
+    /^do\s+you\s+have\s+any\s+other\s+health\s+goals\b/i.test(s) ||
+    /^do\s+you\s+have\s+any\s+dietary\s+restrictions\b/i.test(s)
+  );
+}
+
 function normalizeSuggestions(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
   for (const s of raw) {
     const t = suggestionItemToString(s).replace(/\s+/g, ' ').slice(0, 72);
     if (t.length < 2) continue;
+    if (looksLikeAssistantPhrasedSuggestion(t)) continue;
     if (out.some((x) => x.toLowerCase() === t.toLowerCase())) continue;
     out.push(t);
     if (out.length >= 4) break;

@@ -61,7 +61,7 @@
           </div>
         </aside>
         <main class="main">
-          <header class="main__bar">
+          <header class="main__bar" id="main-toolbar">
             <h2 id="page-title" class="main__title">Dashboard</h2>
             <button type="button" id="btn-refresh" class="btn btn--secondary">Refresh</button>
           </header>
@@ -124,6 +124,7 @@
                     <th>Last seen</th>
                     <th>Stripe</th>
                     <th>Tenant ID</th>
+                    <th>Activity</th>
                   </tr>
                 </thead>
                 <tbody id="table-tenants-body"></tbody>
@@ -135,6 +136,105 @@
               <button type="button" class="btn btn--ghost" id="pager-next" disabled>Next</button>
             </div>
           </section>
+
+          <div id="tenant-detail-view" class="tenant-detail-view hidden" aria-hidden="true">
+            <div class="tenant-detail-view__top">
+              <button type="button" id="tenant-detail-back" class="btn btn--ghost">← Tenants</button>
+              <h2 id="tenant-detail-title" class="main__title">Tenant</h2>
+            </div>
+            <div id="tenant-detail-error" class="banner banner--error hidden"></div>
+            <div id="tenant-detail-summary" class="card tenant-detail-summary"></div>
+            <div class="card">
+              <h3 class="card__title">Search index chunks</h3>
+              <p class="muted">
+                Raw rows in the vector index (per chunk). Use filters to narrow large catalogs; body search can be slow on
+                huge tenants. Text is capped per row in the API for safety.
+              </p>
+              <div class="toolbar toolbar--wrap tenant-chunks-toolbar">
+                <label class="field field--inline">
+                  <span class="field__label">Source type</span>
+                  <select id="tenant-chunks-source" class="field__input">
+                    <option value="">All types</option>
+                    <option value="product">product</option>
+                    <option value="page">page</option>
+                  </select>
+                </label>
+                <label class="field field--inline field--grow">
+                  <span class="field__label">Contains</span>
+                  <input
+                    type="search"
+                    id="tenant-chunks-q"
+                    class="field__input"
+                    placeholder="external_id, title, or body substring"
+                    autocomplete="off"
+                  />
+                </label>
+                <button type="button" class="btn btn--secondary" id="tenant-chunks-apply">Apply</button>
+              </div>
+              <div class="table-wrap">
+                <table class="table table--dense">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th class="mono">external_id</th>
+                      <th class="num">#</th>
+                      <th>Title</th>
+                      <th class="num">Emb</th>
+                      <th>Updated</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="tenant-chunks-tbody"></tbody>
+                </table>
+              </div>
+              <div class="pager">
+                <button type="button" class="btn btn--ghost" id="tenant-chunks-prev" disabled>Previous</button>
+                <span id="tenant-chunks-pager" class="pager__label"></span>
+                <button type="button" class="btn btn--ghost" id="tenant-chunks-next" disabled>Next</button>
+              </div>
+              <div id="tenant-chunk-detail" class="chunk-detail hidden" aria-live="polite">
+                <div class="chunk-detail__head">
+                  <h4 class="chunk-detail__title">Chunk body &amp; metadata</h4>
+                  <button type="button" class="btn btn--ghost btn--small" id="tenant-chunk-detail-close">Close</button>
+                </div>
+                <p class="muted mono chunk-detail__meta" id="tenant-chunk-detail-meta"></p>
+                <pre class="chunk-detail__body" id="tenant-chunk-detail-content"></pre>
+                <pre class="chunk-detail__json mono" id="tenant-chunk-detail-metadata"></pre>
+              </div>
+            </div>
+            <div class="card">
+              <h3 class="card__title">Customer chat transcripts</h3>
+              <p class="muted">
+                Storefront conversations are stored on this API when shoppers use the chat widget (WordPress plugin proxies
+                requests; history is not kept in the WordPress database).
+              </p>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Public session ID</th>
+                      <th class="num">Messages</th>
+                      <th>Last activity</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="tenant-chats-tbody"></tbody>
+                </table>
+              </div>
+              <div class="pager">
+                <button type="button" class="btn btn--ghost" id="tenant-chats-prev" disabled>Previous</button>
+                <span id="tenant-chats-pager" class="pager__label"></span>
+                <button type="button" class="btn btn--ghost" id="tenant-chats-next" disabled>Next</button>
+              </div>
+            </div>
+            <div id="tenant-thread-panel" class="card tenant-thread-panel hidden">
+              <div class="tenant-thread-panel__head">
+                <h3 class="card__title">Conversation</h3>
+                <button type="button" id="tenant-thread-close" class="btn btn--ghost btn--small">Close</button>
+              </div>
+              <div id="tenant-thread-messages" class="transcript-log"></div>
+            </div>
+          </div>
 
           <section id="tab-tiers" class="tab hidden">
             <div id="tiers-error" class="banner banner--error hidden"></div>

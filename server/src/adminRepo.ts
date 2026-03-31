@@ -138,6 +138,8 @@ export async function fetchTenantsPage(
        SELECT tenant_id, COUNT(DISTINCT external_id)::bigint AS pc
        FROM chunks
        WHERE source_type = 'product'
+         AND external_id <> ''
+         AND emb_openai IS NOT NULL
        GROUP BY tenant_id
      ) pc ON pc.tenant_id = t.id
      LEFT JOIN (
@@ -163,7 +165,38 @@ export async function fetchTenantsPage(
      LIMIT $2 OFFSET $3`,
     [q, opts.limit, opts.offset, FREE_TIER_MONTHLY_CHATS, FREE_TIER_MAX_INDEXED_PRODUCTS]
   );
-  return r.rows.map((row) => ({
+  return r.rows.map((row) => mapTenantListRow(row));
+}
+
+type TenantListQueryRow = {
+  id: string;
+  site_url: string;
+  site_name: string | null;
+  embedding_provider: string;
+  llm_provider: string;
+  plugin_version: string | null;
+  wp_version: string | null;
+  wc_version: string | null;
+  created_at: Date;
+  updated_at: Date;
+  last_seen_at: Date | null;
+  subscription_status: string | null;
+  billing_plan_slug: string | null;
+  stripe_customer_id: string | null;
+  chats_utc_month: string;
+  monthly_chat_quota: string;
+  chats_30d: string;
+  ingests_30d: string;
+  embed_tokens_30d: string;
+  chat_prompt_tokens_30d: string;
+  chat_completion_tokens_30d: string;
+  monthly_chat_quota_override: number | null;
+  indexed_product_count: string;
+  max_indexed_products: string;
+};
+
+function mapTenantListRow(row: TenantListQueryRow): TenantListRow {
+  return {
     id: row.id,
     site_url: row.site_url,
     site_name: row.site_name,
@@ -189,7 +222,75 @@ export async function fetchTenantsPage(
     chat_completion_tokens_30d: Number(row.chat_completion_tokens_30d),
     indexed_product_count: Number(row.indexed_product_count),
     max_indexed_products: Number(row.max_indexed_products),
-  }));
+  };
+}
+
+export async function fetchTenantListRowById(
+  client: PoolClient,
+  tenantId: string
+): Promise<TenantListRow | null> {
+  const r = await client.query<TenantListQueryRow>(
+    `SELECT t.id, t.site_url, t.site_name, t.embedding_provider, t.llm_provider,
+            t.plugin_version, t.wp_version, t.wc_version,
+            t.created_at, t.updated_at, t.last_seen_at,
+            t.subscription_status, t.billing_plan_slug, t.stripe_customer_id,
+            COALESCE(um.chats, 0)::text AS chats_utc_month,
+            t.monthly_chat_quota_override,
+            (COALESCE(t.monthly_chat_quota_override,
+              CASE
+                WHEN lower(coalesce(t.subscription_status, '')) IN ('active', 'trialing')
+                  AND t.billing_plan_slug IS NOT NULL
+                  AND bp.monthly_chat_limit IS NOT NULL
+                THEN bp.monthly_chat_limit
+                ELSE $2::int
+              END))::text AS monthly_chat_quota,
+            (CASE
+               WHEN lower(coalesce(t.subscription_status, '')) IN ('active', 'trialing')
+                 AND t.billing_plan_slug IS NOT NULL
+                 AND bp.max_indexed_products IS NOT NULL
+               THEN bp.max_indexed_products
+               ELSE $3::int
+             END)::text AS max_indexed_products,
+            COALESCE(pc.pc, 0)::text AS indexed_product_count,
+            COALESCE(agg.chats, 0)::text AS chats_30d,
+            COALESCE(agg.ingests, 0)::text AS ingests_30d,
+            COALESCE(agg.embed_tokens, 0)::text AS embed_tokens_30d,
+            COALESCE(agg.chat_prompt_tokens, 0)::text AS chat_prompt_tokens_30d,
+            COALESCE(agg.chat_completion_tokens, 0)::text AS chat_completion_tokens_30d
+     FROM tenants t
+     LEFT JOIN billing_plans bp ON bp.slug = t.billing_plan_slug AND bp.active = TRUE
+     LEFT JOIN (
+       SELECT tenant_id, COUNT(DISTINCT external_id)::bigint AS pc
+       FROM chunks
+       WHERE source_type = 'product'
+         AND external_id <> ''
+         AND emb_openai IS NOT NULL
+       GROUP BY tenant_id
+     ) pc ON pc.tenant_id = t.id
+     LEFT JOIN (
+       SELECT tenant_id, SUM(chat_count)::bigint AS chats
+       FROM usage_daily
+       WHERE day >= date_trunc('month', timezone('utc', now()))::date
+         AND day <= (timezone('utc', now()))::date
+       GROUP BY tenant_id
+     ) um ON um.tenant_id = t.id
+     LEFT JOIN (
+       SELECT tenant_id,
+              SUM(chat_count)::bigint AS chats,
+              SUM(ingest_request_count)::bigint AS ingests,
+              SUM(embed_tokens)::bigint AS embed_tokens,
+              SUM(chat_prompt_tokens)::bigint AS chat_prompt_tokens,
+              SUM(chat_completion_tokens)::bigint AS chat_completion_tokens
+       FROM usage_daily
+       WHERE day >= (now() AT TIME ZONE 'utc')::date - 30
+       GROUP BY tenant_id
+     ) agg ON agg.tenant_id = t.id
+     WHERE t.id = $1::uuid
+     LIMIT 1`,
+    [tenantId, FREE_TIER_MONTHLY_CHATS, FREE_TIER_MAX_INDEXED_PRODUCTS]
+  );
+  const row = r.rows[0];
+  return row ? mapTenantListRow(row) : null;
 }
 
 export type AdminConfigSnapshot = {

@@ -57,6 +57,71 @@ body {
   font-size: 0.75rem;
 }
 
+.toolbar--wrap {
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+}
+
+.field--grow .field__input {
+  min-width: 12rem;
+  flex: 1;
+}
+
+.chunk-detail {
+  margin-top: 1.25rem;
+  padding: 1rem 1.1rem;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.chunk-detail__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.chunk-detail__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.chunk-detail__meta {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  word-break: break-all;
+}
+
+.chunk-detail__body {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  max-height: 22rem;
+  overflow: auto;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0a0d11;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+.chunk-detail__json {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  max-height: 12rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  background: #0a0d11;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
 .shell {
   min-height: 100vh;
 }
@@ -523,5 +588,81 @@ body {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 6px;
+  color: var(--text);
+}
+
+.tenant-detail-view {
+  padding: 0 0 2rem;
+}
+
+.tenant-detail-view__top {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.tenant-detail-view__top .main__title {
+  margin: 0;
+}
+
+.tenant-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.75rem 1.25rem;
+}
+
+.tenant-thread-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.tenant-thread-panel__head .card__title {
+  margin: 0;
+}
+
+.transcript-log {
+  max-height: 28rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.25rem 0;
+}
+
+.transcript-msg {
+  border-radius: var(--radius);
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.transcript-msg--user {
+  border-left: 3px solid var(--accent);
+}
+
+.transcript-msg--assistant {
+  border-left: 3px solid var(--ok);
+}
+
+.transcript-msg__meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+
+.transcript-msg__body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font);
+  font-size: 0.875rem;
+  line-height: 1.45;
   color: var(--text);
 }

@@ -60,6 +60,12 @@ Additional JSON APIs (Bearer `ADMIN_API_KEY`):
 - `GET /v1/admin/billing-plans` — lists **`billing_plans`** rows plus **`free_tier_max_indexed_products`** / **`free_tier_monthly_chats`** (from env on the API).
 - `PUT /v1/admin/billing-plans/:slug` — create or update a tier (`monthly_chat_limit`, `max_indexed_products` where **0 = unlimited**, `sort_order`, `active`, optional `stripe_price_id` for future Stripe). Slug pattern: `^[a-z][a-z0-9_-]{1,48}$`. Requires migration **`006_index_limits.sql`**.
 - `PATCH /v1/admin/tenants/:tenantId/billing` — JSON `{ "billing_plan_slug": "<slug>" | null, "subscription_status": "<optional>" }` assigns a paid tier or **`null`** for free defaults (clears subscription when slug is null).
+- `GET /v1/admin/tenants/:tenantId` — tenant profile + usage rollups (same shape as list rows, plus cost estimate) and **`chat_sessions_total`**. Requires migrations **`007_chat_transcripts.sql`** and **`008_chat_session_meta.sql`** (optional metadata columns).
+- `GET /v1/admin/tenants/:tenantId/chats?limit=&offset=` — paginated chat sessions (internal session UUID, public id, message count, timestamps).
+- `GET /v1/admin/tenants/:tenantId/chats/:sessionId/messages` — full message thread for that session (operator review).
+- `GET /v1/admin/tenants/:tenantId/chunks?limit=&offset=&source_type=&q=` — paginated **chunk** rows (indexed text, metadata, embedding flag); optional filters: `source_type` (`product`, `page`, …) and `q` (case-insensitive substring in external_id, title, or content). Operator UI lists these under each tenant.
+
+Tenant (WordPress plugin) **`POST /v1/chat`** (Bearer) persists each turn on the API and returns **`session_id`**. **`GET /v1/chat/session/:publicId/messages?viewer_wp_user_id=`** loads storefront history (enforces WP user ownership when the session is bound to a logged-in customer). **`GET /v1/tenant/chat-sessions`** and **`GET /v1/tenant/chat-sessions/:publicId/messages`** power wp-admin session browsing.
 
 Set **`SERVICE_VERSION`** in Lambda if the version label should not rely on reading `package.json` from disk.
 
