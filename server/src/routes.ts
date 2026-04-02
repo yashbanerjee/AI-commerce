@@ -62,7 +62,7 @@ import {
   tenantHasIndexedProduct,
   type ChunkRow,
 } from './chunksRepo.js';
-import { embedTextWithOpenAi } from './embeddings.js';
+import { embedManyWithOpenAi, embedTextWithOpenAi } from './embeddings.js';
 import { generateAnswerWithOpenAi } from './llm.js';
 import {
   dedupeProductCardsByUrl,
@@ -381,14 +381,22 @@ export async function handleIngest(req: Request, res: Response): Promise<void> {
 
         await deleteChunksForExternal(c, tenant.id, external_id);
         const parts = chunkText(text);
-        let idx = 0;
-        for (const part of parts) {
-          const emb = await embedTextWithOpenAi(part.text, apiKey);
-          embedTokens += emb.promptTokens;
+        if (parts.length === 0) continue;
+
+        // Batch embeddings for all chunks of this item in a single OpenAI request.
+        const { embeddings, promptTokens } = await embedManyWithOpenAi(
+          parts.map((p) => p.text),
+          apiKey
+        );
+        embedTokens += promptTokens;
+
+        for (let idx = 0; idx < parts.length; idx++) {
+          const part = parts[idx];
+          const vec = embeddings[idx];
           await insertChunk(c, {
             tenant_id: tenant.id,
             external_id,
-            chunk_index: idx++,
+            chunk_index: idx,
             source_type: sourceType,
             source_id: String(it.source_id ?? ''),
             url: String(it.url ?? ''),
@@ -399,7 +407,7 @@ export async function handleIngest(req: Request, res: Response): Promise<void> {
               unknown
             >,
             emb_bedrock: null,
-            emb_openai: emb.embedding,
+            emb_openai: vec,
           });
         }
         n += 1;
