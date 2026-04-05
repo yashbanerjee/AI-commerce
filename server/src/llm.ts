@@ -24,12 +24,17 @@ export interface ProductCard {
   title: string;
   url: string;
   price_text: string;
+  /** Optional offer/discount label (e.g. "On sale"). */
+  offer_text?: string;
   /** Product thumbnail (https URL), from CONTEXT or filled server-side from index metadata. */
   image_url: string;
 }
 
 export interface ChatJsonResult {
+  /** Section (1): main answer text. */
   answer: string;
+  /** Section (3): closing statement / follow-up question, plain text. */
+  closing_text?: string;
   citations: Citation[];
   suggestions: string[];
   product_cards: ProductCard[];
@@ -178,6 +183,12 @@ function normalizeProductCards(raw: unknown): ProductCard[] {
         : typeof o.priceText === 'string'
           ? o.priceText.trim().slice(0, 80)
           : '';
+    const offer_text =
+      typeof o.offer_text === 'string'
+        ? o.offer_text.trim().slice(0, 80)
+        : typeof o.offerText === 'string'
+          ? o.offerText.trim().slice(0, 80)
+          : '';
     const iuRaw = o.image_url ?? o.imageUrl ?? o.image ?? o.thumbnail;
     let image_url = '';
     if (typeof iuRaw === 'string') {
@@ -185,7 +196,7 @@ function normalizeProductCards(raw: unknown): ProductCard[] {
       if (iu.startsWith('//')) iu = `https:${iu}`;
       if (/^https?:\/\//i.test(iu)) image_url = iu.slice(0, 2000);
     }
-    out.push({ title, url, price_text, image_url });
+    out.push({ title, url, price_text, offer_text: offer_text || undefined, image_url });
     if (out.length >= CHAT_PRODUCT_CARDS_MAX) break;
   }
   return out;
@@ -207,6 +218,7 @@ function stripCodeFences(s: string): string {
 function parseJsonResponse(text: string): ChatJsonResult {
   const empty: ChatJsonResult = {
     answer: '',
+    closing_text: '',
     citations: [],
     suggestions: [],
     product_cards: [],
@@ -217,6 +229,16 @@ function parseJsonResponse(text: string): ChatJsonResult {
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
     const answer = typeof parsed.answer === 'string' ? parsed.answer : '';
+    const closing_text =
+      typeof parsed.closing_text === 'string'
+        ? parsed.closing_text
+        : typeof parsed.closing === 'string'
+          ? parsed.closing
+          : typeof parsed.followup_text === 'string'
+            ? parsed.followup_text
+            : typeof parsed.followup === 'string'
+              ? parsed.followup
+              : '';
     const sugRaw = firstArray(
       parsed.suggestions,
       parsed.Suggestions,
@@ -227,6 +249,7 @@ function parseJsonResponse(text: string): ChatJsonResult {
     if (!answer) {
       return {
         answer: trimmed,
+        closing_text: closing_text || '',
         citations: normalizeCitations(parsed.citations),
         suggestions: normalizeSuggestions(sugRaw),
         product_cards: normalizeProductCards(cardsRaw),
@@ -234,6 +257,7 @@ function parseJsonResponse(text: string): ChatJsonResult {
     }
     return {
       answer,
+      closing_text: closing_text || '',
       citations: normalizeCitations(parsed.citations),
       suggestions: normalizeSuggestions(sugRaw),
       product_cards: normalizeProductCards(cardsRaw),

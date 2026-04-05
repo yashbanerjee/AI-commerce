@@ -31,6 +31,15 @@ export function extractPriceTextFromMetadata(metadata: unknown): string {
   return t.length > 120 ? `${t.slice(0, 117)}…` : t;
 }
 
+export function extractOfferTextFromMetadata(metadata: unknown): string {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return '';
+  const m = metadata as Record<string, unknown>;
+  const raw = m.offer_text ?? m.offerText ?? m.offer;
+  if (typeof raw !== 'string') return '';
+  const t = raw.replace(/\s+/g, ' ').trim();
+  return t.length > 80 ? `${t.slice(0, 77)}…` : t;
+}
+
 export function productCardUrlKey(u: string): string {
   const t = u.trim();
   if (!t) return '';
@@ -133,7 +142,7 @@ export function mergeCardsWithProductRows(
   const urlSeen = new Set<string>();
 
   const enriched = cards.map((card) => {
-    let { title, url, price_text, image_url } = card;
+    let { title, url, price_text, offer_text, image_url } = card;
     const uk = productCardUrlKey(url);
     if (uk) urlSeen.add(uk);
     if (normalizeImageUrlString(image_url)) return { ...card, image_url: normalizeImageUrlString(image_url) };
@@ -144,10 +153,12 @@ export function mergeCardsWithProductRows(
     if (!byTitle) return card;
     const img = extractImageFromMetadata(byTitle.metadata);
     const pt = price_text || extractPriceTextFromMetadata(byTitle.metadata);
+    const ot = offer_text || extractOfferTextFromMetadata(byTitle.metadata);
     return {
       ...card,
       image_url: img || image_url || '',
       price_text: pt || price_text || '',
+      offer_text: ot || undefined,
     };
   });
 

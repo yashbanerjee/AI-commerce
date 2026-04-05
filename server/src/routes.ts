@@ -68,6 +68,7 @@ import {
   dedupeProductCardsByUrl,
   enrichProductCardsWithImages,
   extractPriceTextFromMetadata,
+  extractOfferTextFromMetadata,
   filterProductCardsForCompareQuery,
   mergeCardsWithProductRows,
   replaceImageLikeProductUrlsFromContext,
@@ -117,7 +118,7 @@ const TONE_PRESET_HINT: Record<string, string> = {
 function isQuickSmallTalk(message: string): boolean {
   const t = message.trim();
   if (t.length > 96) return false;
-  return /^(hi|hello|hey|hiya|howdy|good\s+(morning|afternoon|evening)|thanks|thank\s+you|thx|ok+|okay|bye|goodbye)[\s!.?]*$/i.test(
+  return /^(hi|hello|hey|hiya|howdy|good\s+(morning|afternoon|evening)|thanks|thank\s+you|thx|ok+|okay|bye|goodbye|how\s+are\s+you|how\'?re\s+you|what\'?s\s+up|sup|you\s+ok|everything\s+ok)[\s!.?]*$/i.test(
     t
   );
 }
@@ -196,6 +197,70 @@ function countProductListLines(answer: string): number {
     if (/^\s*\d+\.\s+\S/.test(t) || /^\s*[-*]\s+\S/.test(t)) n += 1;
   }
   return n;
+}
+
+function titleKeyForMatch(s: string): string {
+  return String(s ?? '')
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '$1')
+    .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '')
+    .replace(/[*_`]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * If we have `product_cards`, remove duplicated "product name" bullet/numbered lists from the text answer
+ * so the UI doesn't show "list + cards".
+ */
+function stripProductListsWhenCardsPresent(
+  answer: string,
+  productCards: { title: string; url: string }[]
+): { text: string; removedCount: number } {
+  const raw = String(answer ?? '');
+  if (!raw.trim()) return { text: raw, removedCount: 0 };
+  if (!productCards || productCards.length === 0) return { text: raw, removedCount: 0 };
+
+  const titleKeys = new Set(productCards.map((c) => titleKeyForMatch(c.title)).filter(Boolean));
+  const urlKeys = new Set(
+    productCards
+      .map((c) => String(c.url ?? '').trim())
+      .filter(Boolean)
+      .map((u) => u.replace(/\/$/, '').toLowerCase())
+  );
+
+  const lines = raw.split(/\r?\n/);
+  const keep: string[] = [];
+  let removed = 0;
+
+  for (const line of lines) {
+    const t = line.trim();
+    const listMatch = /^(?:\d+\.)\s+(.+)$/.exec(t) || /^(?:[-*])\s+(.+)$/.exec(t);
+    if (!listMatch) {
+      keep.push(line);
+      continue;
+    }
+    const itemRaw = listMatch[1] ?? '';
+    const itemKey = titleKeyForMatch(itemRaw);
+    const link = /\[([^\]]+)\]\(([^)\s]+)\)/.exec(itemRaw);
+    const href = link && link[2] ? String(link[2]).trim().replace(/\/$/, '').toLowerCase() : '';
+    const isProductLine = (itemKey && titleKeys.has(itemKey)) || (href && urlKeys.has(href));
+    if (isProductLine) {
+      removed++;
+      continue;
+    }
+    keep.push(line);
+  }
+
+  if (removed === 0) return { text: raw, removedCount: 0 };
+
+  const cleaned = keep
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^\s*\n+/g, '')
+    .trimEnd();
+
+  return { text: cleaned, removedCount: removed };
 }
 
 function titleHeadFromAnswerFragment(rest: string): string {
@@ -603,7 +668,7 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
           toneDirective ? `Voice: ${toneDirective}` : '',
           'The shopper sent a very short greeting or thanks. Reply warmly in 1–3 sentences. No products, no shopping, no catalog.',
           'Respond with exactly one JSON object (no markdown code fences). product_cards MUST be []. suggestions MUST be [].',
-          '{"answer":string,"citations":[],"suggestions":[],"product_cards":[]}',
+          '{"answer":string,"closing_text":string,"citations":[],"suggestions":[],"product_cards":[]}',
         ]
           .filter(Boolean)
           .join('\n');
@@ -674,7 +739,14 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
             : 'When listing multiple products, use a short friendly sentence, then a numbered list of product names (plain text) using only items supported by RETRIEVAL CONTEXT. Use [title](url) when the URL is in CONTEXT.',
           'Product cards: use exact product titles from RETRIEVAL CONTEXT — never use placeholder link text like "View Product" or "Read more". If the shopper compares two named products (e.g. "Compare X and Y"), product_cards must contain only those two products from CONTEXT, no extra recommendations.',
           'SUGGESTIONS (tap chips): 2–4 strings, each written as the SHOPPER\'s next chat message — what they would type or ask the store next (e.g. "Tell me more about the second product", "Compare these two", "I need help choosing for my budget"). First-person / direct questions to the shop are good. FORBIDDEN: phrasing as the assistant talking to the user — do not use "Can I help you…", "Would you like…", "Are you interested…", "Do you have any other goals…", "May I…", or any sales-y question from the bot to the customer. Use [] if no good shopper-style follow-ups.',
-          `Respond with exactly one JSON object (no markdown code fences): {"answer":string,"citations":[...],"suggestions":[...],"product_cards":[...]}. citations: relevant sources or []. suggestions: see SUGGESTIONS rules above, or []. product_cards: optional; [] is fine — the server enriches from CONTEXT. If you fill product_cards, every item must match products in RETRIEVAL CONTEXT (title, url, image_url); do not use the outline as a product list. Never paste these instructions into answer.`,
+          'OUTPUT FORMAT MUST BE STRICT (4 parts, in data fields; do not include product lists or citations inline in the answer text).',
+          `Respond with exactly one JSON object (no markdown code fences): {"answer":string,"closing_text":string,"citations":[...],"suggestions":[...],"product_cards":[...]}.` +
+            ' answer: Part (1) main response text only.' +
+            ' product_cards: Part (2) products mentioned in the response (these will render inline as part of the message); [] is fine — the server enriches from CONTEXT.' +
+            ' closing_text: Part (3) plain text conclusion or a single follow-up question to move the conversation forward.' +
+            ' citations: Part (4) relevant sources or [].' +
+            ' suggestions: see SUGGESTIONS rules above, or [].' +
+            ' If you fill product_cards, every item must match products in RETRIEVAL CONTEXT (title, url, image_url). Do not use the outline as a product list. Never paste these instructions into answer or closing_text.',
         ].filter(Boolean);
 
         system = systemParts.join('\n');
@@ -747,6 +819,44 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
         return keys;
       }
 
+      /**
+       * Some completions mention products inline (no numbered/bullet list), e.g.
+       * "Here are more items we carry: Foo, Bar, Baz, and Qux."
+       * Extract those candidate titles so we can attach product_cards from retrieval.
+       */
+      function extractInlineMentionedTitles(answer: string): string[] {
+        const t = String(answer ?? '').trim();
+        if (!t) return [];
+        // Grab the text after a colon if present; otherwise use the whole sentence.
+        const afterColon = t.includes(':') ? t.split(':').slice(1).join(':') : t;
+        // Stop at the first sentence end to avoid trailing prose.
+        const head = afterColon.split(/[.!?\n]/)[0] ?? afterColon;
+        const cleaned = head
+          .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '$1')
+          .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '')
+          .replace(/[*_`]+/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (!cleaned) return [];
+
+        // Split on commas and the final "and".
+        const parts = cleaned
+          .replace(/\s+and\s+/gi, ', ')
+          .split(',')
+          .map((p) => p.trim())
+          .filter(Boolean);
+
+        const out: string[] = [];
+        for (const p of parts) {
+          if (!p) continue;
+          if (/^(price|stock|description|ingredients)\b/i.test(p)) continue;
+          const titleOnly = p.split(' - ')[0]?.split(' — ')[0]?.trim() ?? p;
+          if (titleOnly) out.push(titleOnly);
+          if (out.length >= CHAT_PRODUCT_CARDS_MAX * 2) break;
+        }
+        return out;
+      }
+
       function inferProductCardsFromAnswerMarkdown(answer: string) {
         const cards: { title: string; url: string; price_text: string; image_url: string }[] = [];
         if (!answer) return cards;
@@ -786,7 +896,13 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
       }
 
       function inferProductCardsFromContextRows() {
-        const cards: { title: string; url: string; price_text: string; image_url: string }[] = [];
+        const cards: {
+          title: string;
+          url: string;
+          price_text: string;
+          offer_text?: string;
+          image_url: string;
+        }[] = [];
         for (const r of rows) {
           if (!r) continue;
           // Prefer actual product chunks.
@@ -796,7 +912,8 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
           if (!title || !url) continue;
           const image_url = extractImageFromMetadata(r.metadata);
           const price_text = extractPriceTextFromMetadata(r.metadata);
-          cards.push({ title, url, price_text, image_url });
+          const offer_text = extractOfferTextFromMetadata(r.metadata);
+          cards.push({ title, url, price_text, offer_text: offer_text || undefined, image_url });
           if (cards.length >= CHAT_PRODUCT_CARDS_MAX) break;
         }
         return cards;
@@ -809,18 +926,31 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
       const fromModel = !policyQ && out.product_cards && out.product_cards.length ? out.product_cards : [];
       const fromAnswer = policyQ ? [] : inferProductCardsFromAnswerMarkdown(out.answer);
       const fromListLines = policyQ ? [] : inferProductCardsFromListLines(out.answer, rows);
-      let mergedModelAnswer = dedupeProductCardsByUrl([...fromModel, ...fromAnswer, ...fromListLines]);
+      const fromInlineMentions = policyQ
+        ? []
+        : inferProductCardsFromListLines(
+            extractInlineMentionedTitles(out.answer)
+              .map((x, i) => `${i + 1}. ${x}`)
+              .join('\n'),
+            rows
+          );
+      let mergedModelAnswer = dedupeProductCardsByUrl([
+        ...fromModel,
+        ...fromAnswer,
+        ...fromListLines,
+        ...fromInlineMentions,
+      ]);
       const productListLineCount = countProductListLines(out.answer);
       const productRowCount = rows.filter((r) => String(r.source_type ?? '') === 'product').length;
+      /** Never attach random retrieval products when the model returned none and we inferred none from the answer. */
       let fromContext: { title: string; url: string; price_text: string; image_url: string }[] = [];
-      if (!policyQ && mergedModelAnswer.length === 0) {
-        fromContext = inferProductCardsFromContextRows();
-      } else if (
+      if (
         !policyQ &&
         fromModel.length === 0 &&
+        mergedModelAnswer.length > 0 &&
         (productListLineCount > mergedModelAnswer.length || productRowCount > mergedModelAnswer.length)
       ) {
-        /** Prose-only / inferred cards: retrieval may have more hits than the answer listed — merge the rest. */
+        /** Answer already lists or implies specific products — merge extra retrieval hits if needed. */
         fromContext = inferProductCardsFromContextRows();
       }
       const mergedCards = dedupeProductCardsByUrl([...mergedModelAnswer, ...fromContext]).slice(
@@ -845,9 +975,12 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
       mark('postprocess_cards');
 
       /** Full answer text; product cards are shown separately — do not strip headings/bullets that mention product names. */
-      const cleanedAnswer = out.answer;
+      const listStrip = policyQ ? { text: out.answer, removedCount: 0 } : stripProductListsWhenCardsPresent(out.answer, product_cards);
+      const cleanedAnswer = listStrip.text;
       mark('answer_ready');
-      await appendUserAssistantTurn(c, sessionRow.id, message, out.answer);
+      const transcriptAssistant =
+        cleanedAnswer + (out.closing_text && String(out.closing_text).trim() ? `\n\n${String(out.closing_text).trim()}` : '');
+      await appendUserAssistantTurn(c, sessionRow.id, message, transcriptAssistant);
       mark('store_transcript');
       await recordUsageAndTouch(c, tenant.id, {
         chat: 1,
@@ -907,6 +1040,7 @@ export async function handleChat(req: Request, res: Response): Promise<void> {
 
     res.json({
       answer: result.out.answer,
+      closing_text: String(result.out.closing_text ?? ''),
       citations: result.out.citations,
       suggestions: result.out.suggestions,
       product_cards: result.out.product_cards,
